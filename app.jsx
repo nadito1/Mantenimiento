@@ -15,18 +15,50 @@ const download = (filename, data) => {
 };
 
 // Catálogos
-const LINEAS = ["Flynn", "CV-1000", "Delver", "Tabletas", "Bombones", "Servicios (Caldera/Frío)"];
+const SUPERVISORES = ["ALLOI", "AVILA", "BOERIS"];
+
+const SECTORES = [
+  "CHOCOLATE",
+  "ALFAJOR",
+  "HUEVO DE PASCUA",
+  "BARRA DE MANI",
+  "TURRON",
+  "BARRA DE CEREALES",
+  "CARAMELO BLANDO",
+  "CARAMELO DURO",
+  "ARTESANAL",
+  "CUBANITO",
+  "CONFITE",
+  "OTROS",
+];
+
+const LINEAS_POR_SECTOR = {
+  CHOCOLATE: ["CV1000-1", "CV1000-2", "CV1000-3", "DELVER", "CHISPAS", "MANGA"],
+  TURRON: ["NAMUR", "TURRON FIESTA", "CROCANTE", "ESTUCHADO TURRON", "ARTESANAL"],
+  "CARAMELO BLANDO": ["FLYNN", "FLYNNIES", "XXL", "EMZO", "ENVAMEC"],
+  "CARAMELO DURO": ["EMZO", "ENVAMEC"],
+  CONFITE: ["PACK PLUS", "ESTUCHADORA", "CONFITE"],
+  ALFAJOR: ["ALFAJOR"],
+  "HUEVO DE PASCUA": ["HUEVO DE PASCUA"],
+  "BARRA DE MANI": ["BARRA DE MANI", "LINGOTE"],
+  "BARRA DE CEREALES": ["BARRA DE CEREALES"],
+  CUBANITO: ["CUBANITO"],
+  ARTESANAL: [],
+  OTROS: [],
+};
+
+const LINEAS = Array.from(new Set(Object.values(LINEAS_POR_SECTOR).flat()));
+
 const TURNOS = ["M", "T", "N"]; // Mañana, Tarde, Noche (solo inicial)
 const AREAS = ["Estuchadora", "Balanza", "Mesas de refrigeración", "Cocción", "Empaque", "Servicios"];
 const TIPOS_PARADA = ["No planificada", "Planificada", "Falta de insumos"];
 const CRITICIDAD = ["A", "B", "C"];
 
-// Helpers de fecha
+// Helpers de fecha y números
 const toDate = (s) => new Date(s);
 const inRange = (d, desde, hasta) =>
   d >= new Date(desde + "T00:00") && d <= new Date(hasta + "T23:59:59");
 
-// Parser números desde CSV (coma, punto, etc.)
 const parseNumero = (str) => {
   if (str == null) return 0;
   const cleaned = String(str).trim().replace(/\./g, "").replace(",", ".");
@@ -52,7 +84,6 @@ function App() {
           filtroTurno: parsed.filtroTurno ?? "Todos",
           paradas: parsed.paradas ?? [],
           ots: parsed.ots ?? [],
-          // NUEVO: arrays para producción y economía (si no existían)
           produccion: parsed.produccion ?? [],
           economia: parsed.economia ?? [],
         };
@@ -78,8 +109,8 @@ function App() {
       filtroTurno: "Todos",
       paradas: [],
       ots: [],
-      produccion: [], // NUEVO
-      economia: [],   // NUEVO
+      produccion: [],
+      economia: [],
     };
   });
 
@@ -152,7 +183,7 @@ function App() {
     [otsFiltradas]
   );
 
-  // KPIs mantenimiento (igual que antes)
+  // KPIs mantenimiento
   const downtimeTotalMin = useMemo(
     () => paradasFiltradas.reduce((acc, p) => acc + (Number(p.downtimeMin) || 0), 0),
     [paradasFiltradas]
@@ -187,7 +218,7 @@ function App() {
   const pctPrev = (otsPrev / otsTot) * 100;
   const pctCorr = (otsCorr / otsTot) * 100;
 
-  // Patrones Flynn (siguen igual)
+  // Patrones Flynn (siguen usando paradas si las importás)
   const patrones = [
     {
       id: "falta_insumos",
@@ -224,32 +255,7 @@ function App() {
       .reduce((a, p) => a + (p.downtimeMin || 0), 0),
   }));
 
-  // Manejo formularios OTs
-  const addParada = () => {
-    setState((s) => ({
-      ...s,
-      paradas: [
-        ...s.paradas,
-        {
-          id: crypto.randomUUID(),
-          fecha: new Date().toISOString().slice(0, 16),
-          linea: "Flynn",
-          turno: "M",
-          area: "Empaque",
-          equipo: "",
-          motivo: "",
-          tipoParada: "No planificada",
-          criticidad: "B",
-          codigoFalla: "",
-          causaRaiz: "",
-          repuestos: "",
-          costoARS: 0,
-          downtimeMin: 0,
-        },
-      ],
-    }));
-  };
-
+  // Manejo formularios OTs / producción / economía
   const addOTCorrectiva = () => {
     setState((s) => ({
       ...s,
@@ -258,7 +264,7 @@ function App() {
         {
           id: crypto.randomUUID(),
           fecha: new Date().toISOString().slice(0, 10),
-          linea: "Flynn",
+          linea: "",
           turno: "M",
           equipo: "",
           tipo: "Correctivo",
@@ -284,7 +290,7 @@ function App() {
           id: crypto.randomUUID(),
           fecha: new Date().toISOString().slice(0, 10),
           fechaEjec: "",
-          linea: "Flynn",
+          linea: "",
           turno: "M",
           equipo: "",
           tipo: "Preventivo",
@@ -301,7 +307,6 @@ function App() {
     }));
   };
 
-  // NUEVO: Producción y Economía
   const addProduccion = () => {
     setState((s) => ({
       ...s,
@@ -311,7 +316,7 @@ function App() {
           id: crypto.randomUUID(),
           fecha: new Date().toISOString().slice(0, 10),
           turno: "M",
-          sector: "",
+          sector: "CHOCOLATE",
           linea: "",
           kgPlan: 0,
           kgProd: 0,
@@ -319,7 +324,7 @@ function App() {
           kgReproceso: 0,
           kgDecomiso: 0,
           tiempoParadaMin: 0,
-          supervisor: "",
+          supervisor: "ALLOI",
           novedades: "",
         },
       ],
@@ -333,7 +338,7 @@ function App() {
         ...s.economia,
         {
           id: crypto.randomUUID(),
-          periodo: new Date().toISOString().slice(0, 7), // yyyy-MM
+          periodo: new Date().toISOString().slice(0, 7),
           sector: "",
           gastoMantenimientoUSD: 0,
           costoEnergiaUSD: 0,
@@ -374,7 +379,6 @@ function App() {
     location.reload();
   };
 
-  // NUEVO: Importar CSV de producción
   const onImportProduccionCsv = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -456,23 +460,29 @@ function App() {
           if (turnoRaw.startsWith("T")) turno = "T";
           else if (turnoRaw.startsWith("N")) turno = "N";
 
-          const sector = val(idxSector);
-          const linea = val(idxLinea);
+          const rawSector = val(idxSector).toUpperCase();
+          const sectorNormalizado = SECTORES.includes(rawSector) ? rawSector : "OTROS";
+
+          const lineaCsv = val(idxLinea);
           const kgPlan = parseNumero(val(idxKgPlan));
           const kgProd = parseNumero(val(idxKgProd));
           const kgReproceso = parseNumero(val(idxKgReproceso));
           const kgDecomiso = parseNumero(val(idxKgDecomiso));
           const cumpPlan = idxCumpPlan !== -1 ? parseNumero(val(idxCumpPlan)) : 0;
           const tiempoParadaMin = parseNumero(val(idxTiempoParada));
-          const supervisor = val(idxSupervisor);
+
+          const supRaw = val(idxSupervisor).toUpperCase();
+          const supervisor =
+            SUPERVISORES.find((s) => s === supRaw) ?? SUPERVISORES[0];
+
           const novedades = idxNovedades !== -1 ? val(idxNovedades) : "";
 
           nuevos.push({
             id: crypto.randomUUID(),
             fecha,
             turno,
-            sector,
-            linea,
+            sector: sectorNormalizado,
+            linea: lineaCsv,
             kgPlan,
             kgProd,
             cumpPlan,
@@ -503,7 +513,6 @@ function App() {
     if (fileProdCsvRef.current) fileProdCsvRef.current.value = "";
   };
 
-  // Notas
   const [notas, setNotas] = useState(localStorage.getItem("kpi-notas") || "");
   useEffect(() => {
     localStorage.setItem("kpi-notas", notas);
@@ -752,9 +761,6 @@ function App() {
           </div>
         </section>
 
-        {/* ⚠️ CUADRO 1: Eventos de Parada — ELIMINADO DEL UI ⚠️ */}
-        {/* Solo dejamos la lógica para MTTR/MTBF, pero ya no mostramos la tabla de carga. */}
-
         {/* CUADRO 2: OTs Correctivas */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <div
@@ -828,8 +834,11 @@ function App() {
                           }))
                         }
                       >
+                        <option value="">-</option>
                         {LINEAS.map((l) => (
-                          <option key={l}>{l}</option>
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
                         ))}
                       </select>
                     </td>
@@ -1101,8 +1110,11 @@ function App() {
                           }))
                         }
                       >
+                        <option value="">-</option>
                         {LINEAS.map((l) => (
-                          <option key={l}>{l}</option>
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
                         ))}
                       </select>
                     </td>
@@ -1302,22 +1314,37 @@ function App() {
                       </select>
                     </td>
                     <td>
-                      <input
-                        type="text"
-                        value={r.sector || ""}
-                        onChange={(e) =>
+                      <select
+                        value={r.sector || "CHOCOLATE"}
+                        onChange={(e) => {
+                          const nuevoSector = e.target.value;
                           setState((s) => ({
                             ...s,
                             produccion: s.produccion.map((x) =>
-                              x.id === r.id ? { ...x, sector: e.target.value } : x
+                              x.id === r.id
+                                ? {
+                                    ...x,
+                                    sector: nuevoSector,
+                                    linea: (LINEAS_POR_SECTOR[nuevoSector] || []).includes(
+                                      x.linea
+                                    )
+                                      ? x.linea
+                                      : "",
+                                  }
+                                : x
                             ),
-                          }))
-                        }
-                      />
+                          }));
+                        }}
+                      >
+                        {SECTORES.map((sec) => (
+                          <option key={sec} value={sec}>
+                            {sec}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td>
-                      <input
-                        type="text"
+                      <select
                         value={r.linea || ""}
                         onChange={(e) =>
                           setState((s) => ({
@@ -1327,7 +1354,14 @@ function App() {
                             ),
                           }))
                         }
-                      />
+                      >
+                        <option value="">-</option>
+                        {(LINEAS_POR_SECTOR[r.sector] || []).map((l) => (
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td>
                       <input
@@ -1432,9 +1466,8 @@ function App() {
                       />
                     </td>
                     <td>
-                      <input
-                        type="text"
-                        value={r.supervisor || ""}
+                      <select
+                        value={r.supervisor || "ALLOI"}
                         onChange={(e) =>
                           setState((s) => ({
                             ...s,
@@ -1445,7 +1478,13 @@ function App() {
                             ),
                           }))
                         }
-                      />
+                      >
+                        {SUPERVISORES.map((sup) => (
+                          <option key={sup} value={sup}>
+                            {sup}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td>
                       <textarea
@@ -1637,8 +1676,6 @@ function App() {
       </div>
     </div>
   );
-}
-
 function KpiCard({ title, value, hint }) {
   return (
     <div className="card">
