@@ -1,9 +1,6 @@
 const { useState, useEffect, useMemo, useRef } = React;
 
-const MINUTOS_TURNO = 390;
-
-// ================== UTILIDADES ==================
-
+// Utilidades
 const formatNumber = (n, digits = 2) =>
   isFinite(n) ? n.toLocaleString("es-AR", { maximumFractionDigits: digits }) : "-";
 
@@ -17,6 +14,19 @@ const download = (filename, data) => {
   URL.revokeObjectURL(url);
 };
 
+// Catálogos
+const LINEAS = ["Flynn", "CV-1000", "Delver", "Tabletas", "Bombones", "Servicios (Caldera/Frío)"];
+const TURNOS = ["M", "T", "N"]; // Mañana, Tarde, Noche (solo inicial)
+const AREAS = ["Estuchadora", "Balanza", "Mesas de refrigeración", "Cocción", "Empaque", "Servicios"];
+const TIPOS_PARADA = ["No planificada", "Planificada", "Falta de insumos"];
+const CRITICIDAD = ["A", "B", "C"];
+
+// Helpers de fecha
+const toDate = (s) => new Date(s);
+const inRange = (d, desde, hasta) =>
+  d >= new Date(desde + "T00:00") && d <= new Date(hasta + "T23:59:59");
+
+// Parser números desde CSV (coma, punto, etc.)
 const parseNumero = (str) => {
   if (str == null) return 0;
   const cleaned = String(str).trim().replace(/\./g, "").replace(",", ".");
@@ -24,137 +34,64 @@ const parseNumero = (str) => {
   return isFinite(n) ? n : 0;
 };
 
-const monthKey = (dateStr) => {
-  if (!dateStr) return "";
-  const d = new Date(dateStr + "T00:00");
-  if (isNaN(d.getTime())) return "";
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
-};
-
-// ================== CATÁLOGOS ==================
-
-const SUPERVISORES = ["ALLOI", "AVILA", "BOERIS"];
-
-const TURNOS = ["Mañana", "Tarde", "Noche"];
-const turnoLabel = (t) => (t ? t[0] : "");
-
-const SECTORES = [
-  "CHOCOLATE",
-  "ALFAJOR",
-  "HUEVO DE PASCUA",
-  "BARRA DE MANI",
-  "TURRON",
-  "BARRA DE CEREALES",
-  "CARAMELO BLANDO",
-  "CARAMELO DURO",
-  "ARTESANAL",
-  "CUBANITO",
-  "CONFITE",
-];
-
-const LINEAS_POR_SECTOR = {
-  CHOCOLATE: ["CV1000-1", "CV1000-2", "CV1000-3", "DELVER", "CHISPAS", "MANGA"],
-  TURRON: ["NAMUR", "TURRON FIESTA", "CROCANTE", "ESTUCHADO", "TURRON ARTESANAL"],
-  "CARAMELO BLANDO": ["FLYNN", "FLYNNIES", "XXL", "EMZO", "ENVAMEC"],
-  "CARAMELO DURO": ["EMZO", "ENVAMEC"],
-  CONFITE: ["PACK PLUS", "ESTUCHADORA", "CONFITE"],
-  ALFAJOR: ["ALFAJOR"],
-  "HUEVO DE PASCUA": ["HUEVO DE PASCUA"],
-  "BARRA DE MANI": ["BARRA DE MANI", "LINGOTE"],
-  "BARRA DE CEREALES": ["BARRA DE CEREALES"],
-  CUBANITO: ["CUBANITO"],
-  ARTESANAL: [],
-};
-
-const LINEAS = Array.from(new Set(Object.values(LINEAS_POR_SECTOR).flat()));
-
-const AREAS = [
-  "Estuchadora",
-  "Balanza",
-  "Mesas de refrigeración",
-  "Cocción",
-  "Empaque",
-  "Servicios",
-];
-
-const TIPOS_PARADA = ["No planificada", "Planificada", "Falta de insumos"];
-const CRITICIDAD = ["A", "B", "C"];
-
-// ================== FECHAS ==================
-
-const toDate = (s) => new Date(s);
-const inRange = (d, desde, hasta) =>
-  d >= new Date(desde + "T00:00") && d <= new Date(hasta + "T23:59:59");
-
-// ================== ESTADO INICIAL / NORMALIZACIÓN ==================
-
-const buildDefaultState = () => {
-  const hoy = new Date();
-  const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
-    .toISOString()
-    .slice(0, 10);
-  const ultimoDiaMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0)
-    .toISOString()
-    .slice(0, 10);
-
-  return {
-    periodoDesde: primerDiaMes,
-    periodoHasta: ultimoDiaMes,
-    horasPlanificadas: 720,
-    capacidadHHsemana: 160,
-    filtroLinea: "Todas",
-    filtroTurno: "Todos",
-    filtroSector: "Todos",
-    filtroSupervisor: "Todos",
-    paradas: [],
-    ots: [],
-    produccion: [],
-    economia: [],
-  };
-};
-
-const normalizeState = (raw) => {
-  const base = buildDefaultState();
-  if (!raw || typeof raw !== "object") return base;
-  return {
-    ...base,
-    ...raw,
-    paradas: raw.paradas || [],
-    ots: raw.ots || [],
-    produccion: raw.produccion || [],
-    economia: raw.economia || [],
-  };
-};
-
-// ================== COMPONENTE PRINCIPAL ==================
-
+// Componente principal
 function App() {
   const [state, setState] = useState(() => {
-    const saved = localStorage.getItem("kpi-mantenimiento-georgalos-v3");
+    const saved = localStorage.getItem("kpi-mantenimiento-georgalos-v2");
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        return normalizeState(parsed);
+        return {
+          periodoDesde: parsed.periodoDesde,
+          periodoHasta: parsed.periodoHasta,
+          horasPlanificadas: parsed.horasPlanificadas ?? 720,
+          ventasARS: parsed.ventasARS ?? 0,
+          costoMantenimientoARS: parsed.costoMantenimientoARS ?? 0,
+          capacidadHHsemana: parsed.capacidadHHsemana ?? 160,
+          filtroLinea: parsed.filtroLinea ?? "Todas",
+          filtroTurno: parsed.filtroTurno ?? "Todos",
+          paradas: parsed.paradas ?? [],
+          ots: parsed.ots ?? [],
+          // NUEVO: arrays para producción y economía (si no existían)
+          produccion: parsed.produccion ?? [],
+          economia: parsed.economia ?? [],
+        };
       } catch (e) {
         console.error("Error leyendo localStorage", e);
       }
     }
-    return buildDefaultState();
+    const hoy = new Date();
+    const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
+      .toISOString()
+      .slice(0, 10);
+    const ultimoDiaMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0)
+      .toISOString()
+      .slice(0, 10);
+    return {
+      periodoDesde: primerDiaMes,
+      periodoHasta: ultimoDiaMes,
+      horasPlanificadas: 720,
+      ventasARS: 0,
+      costoMantenimientoARS: 0,
+      capacidadHHsemana: 160,
+      filtroLinea: "Todas",
+      filtroTurno: "Todos",
+      paradas: [],
+      ots: [],
+      produccion: [], // NUEVO
+      economia: [],   // NUEVO
+    };
   });
 
+  // Persistencia
   useEffect(() => {
-    localStorage.setItem("kpi-mantenimiento-georgalos-v3", JSON.stringify(state));
+    localStorage.setItem("kpi-mantenimiento-georgalos-v2", JSON.stringify(state));
   }, [state]);
 
-  // ======= FILTROS POR PERÍODO =======
-
+  // Filtros por período
   const paradasPeriodo = useMemo(
     () =>
-      state.paradas.filter((p) =>
-        inRange(toDate(p.fecha), state.periodoDesde, state.periodoHasta)
-      ),
+      state.paradas.filter((p) => inRange(toDate(p.fecha), state.periodoDesde, state.periodoHasta)),
     [state.paradas, state.periodoDesde, state.periodoHasta]
   );
 
@@ -174,8 +111,7 @@ function App() {
     [state.produccion, state.periodoDesde, state.periodoHasta]
   );
 
-  // ======= FILTROS COMBINADOS =======
-
+  // Filtros por línea/turno
   const paradasFiltradas = useMemo(
     () =>
       paradasPeriodo.filter(
@@ -198,25 +134,15 @@ function App() {
 
   const produccionFiltrada = useMemo(
     () =>
-      produccionPeriodo.filter((r) => {
-        const okSector =
-          state.filtroSector === "Todos" || r.sector === state.filtroSector;
-        const okLinea = state.filtroLinea === "Todas" || r.linea === state.filtroLinea;
-        const okTurno =
-          state.filtroTurno === "Todos" || r.turno === state.filtroTurno;
-        const okSup =
-          state.filtroSupervisor === "Todos" || r.supervisor === state.filtroSupervisor;
-        return okSector && okLinea && okTurno && okSup;
-      }),
-    [
-      produccionPeriodo,
-      state.filtroSector,
-      state.filtroLinea,
-      state.filtroTurno,
-      state.filtroSupervisor,
-    ]
+      produccionPeriodo.filter(
+        (r) =>
+          (state.filtroLinea === "Todas" || r.linea === state.filtroLinea) &&
+          (state.filtroTurno === "Todos" || r.turno === state.filtroTurno)
+      ),
+    [produccionPeriodo, state.filtroLinea, state.filtroTurno]
   );
 
+  // Subconjuntos por tipo
   const otsCorrFiltradas = useMemo(
     () => otsFiltradas.filter((o) => o.tipo === "Correctivo"),
     [otsFiltradas]
@@ -226,8 +152,7 @@ function App() {
     [otsFiltradas]
   );
 
-  // ======= KPIs MANTENIMIENTO (PARADAS + OTs) =======
-
+  // KPIs mantenimiento (igual que antes)
   const downtimeTotalMin = useMemo(
     () => paradasFiltradas.reduce((acc, p) => acc + (Number(p.downtimeMin) || 0), 0),
     [paradasFiltradas]
@@ -262,102 +187,7 @@ function App() {
   const pctPrev = (otsPrev / otsTot) * 100;
   const pctCorr = (otsCorr / otsTot) * 100;
 
-  // ======= KPIs PRODUCCIÓN (USANDO CSV / CARGA) =======
-
-  const totalKgPlan = produccionFiltrada.reduce(
-    (acc, r) => acc + (Number(r.kgPlan) || 0),
-    0
-  );
-  const totalKgProd = produccionFiltrada.reduce(
-    (acc, r) => acc + (Number(r.kgProd) || 0),
-    0
-  );
-  const totalKgReproceso = produccionFiltrada.reduce(
-    (acc, r) => acc + (Number(r.kgReproceso) || 0),
-    0
-  );
-  const totalKgDecomiso = produccionFiltrada.reduce(
-    (acc, r) => acc + (Number(r.kgDecomiso) || 0),
-    0
-  );
-  const totalTurnos = produccionFiltrada.length;
-
-  const downtimeProdMin = produccionFiltrada.reduce(
-    (acc, r) => acc + (Number(r.tiempoParadaMin) || 0),
-    0
-  );
-  const tiempoPlanTotalMin = totalTurnos * MINUTOS_TURNO;
-  const uptimeProdMin = Math.max(0, tiempoPlanTotalMin - downtimeProdMin);
-
-  const fallasProd = produccionFiltrada.filter(
-    (r) => (Number(r.tiempoParadaMin) || 0) > 0
-  ).length;
-
-  const MTTR_prod_h = fallasProd > 0 ? (downtimeProdMin / 60) / fallasProd : 0;
-  const MTBF_prod_h = fallasProd > 0 ? (uptimeProdMin / 60) / fallasProd : 0;
-
-  const dispProd = tiempoPlanTotalMin > 0 ? uptimeProdMin / tiempoPlanTotalMin : 0;
-  const perfProd = totalKgPlan > 0 ? totalKgProd / totalKgPlan : 0;
-  const calidadProd =
-    totalKgProd > 0
-      ? (totalKgProd - totalKgReproceso - totalKgDecomiso) / totalKgProd
-      : 0;
-
-  const OEE_prod = dispProd * perfProd * calidadProd;
-  const horasTrabajadasProd = uptimeProdMin / 60;
-
-  // ======= KPIs POR SUPERVISOR =======
-
-  const kpisSupervisores = SUPERVISORES.map((sup) => {
-    const filas = produccionPeriodo.filter((r) => {
-      const okSup = r.supervisor === sup;
-      const okSector =
-        state.filtroSector === "Todos" || r.sector === state.filtroSector;
-      const okLinea =
-        state.filtroLinea === "Todas" || r.linea === state.filtroLinea;
-      const okTurno =
-        state.filtroTurno === "Todos" || r.turno === state.filtroTurno;
-      return okSup && okSector && okLinea && okTurno;
-    });
-
-    if (filas.length === 0) {
-      return {
-        supervisor: sup,
-        eficiencia: 0,
-        oee: 0,
-      };
-    }
-
-    const kgPlan = filas.reduce((a, r) => a + (Number(r.kgPlan) || 0), 0);
-    const kgProd = filas.reduce((a, r) => a + (Number(r.kgProd) || 0), 0);
-    const kgRep = filas.reduce((a, r) => a + (Number(r.kgReproceso) || 0), 0);
-    const kgDec = filas.reduce((a, r) => a + (Number(r.kgDecomiso) || 0), 0);
-
-    const turnos = filas.length;
-    const tPlan = turnos * MINUTOS_TURNO;
-    const dParo = filas.reduce(
-      (a, r) => a + (Number(r.tiempoParadaMin) || 0),
-      0
-    );
-    const tUp = Math.max(0, tPlan - dParo);
-
-    const disp = tPlan > 0 ? tUp / tPlan : 0;
-    const perf = kgPlan > 0 ? kgProd / kgPlan : 0;
-    const cal =
-      kgProd > 0 ? (kgProd - kgRep - kgDec) / kgProd : 0;
-
-    const oee = disp * perf * cal;
-    const eficiencia = kgPlan > 0 ? (kgProd / kgPlan) * 100 : 0;
-
-    return {
-      supervisor: sup,
-      eficiencia,
-      oee: oee * 100,
-    };
-  });
-
-  // ======= PATRONES (SIGUEN BASADOS EN PARADAS, POR SI IMPORTÁS MÁS ADELANTE) =======
-
+  // Patrones Flynn (siguen igual)
   const patrones = [
     {
       id: "falta_insumos",
@@ -394,32 +224,31 @@ function App() {
       .reduce((a, p) => a + (p.downtimeMin || 0), 0),
   }));
 
-  // ======= DATOS ECONÓMICOS (MENSUALES, POR SECTOR) =======
-
-  const economiaCalculada = state.economia.map((e) => {
-    const toneladasSector = produccionPeriodo
-      .filter(
-        (r) =>
-          monthKey(r.fecha) === e.periodo &&
-          r.sector === e.sector
-      )
-      .reduce((a, r) => a + (Number(r.kgProd) || 0), 0) / 1000;
-
-    const mantUSD = Number(e.gastoMantenimientoUSD) || 0;
-    const enerUSD = Number(e.costoEnergiaUSD) || 0;
-
-    const mantPorTon = toneladasSector > 0 ? mantUSD / toneladasSector : 0;
-    const enerPorTon = toneladasSector > 0 ? enerUSD / toneladasSector : 0;
-
-    return {
-      ...e,
-      toneladasSector,
-      mantPorTon,
-      enerPorTon,
-    };
-  });
-
-  // ======= MANEJO FORMULARIOS =======
+  // Manejo formularios OTs
+  const addParada = () => {
+    setState((s) => ({
+      ...s,
+      paradas: [
+        ...s.paradas,
+        {
+          id: crypto.randomUUID(),
+          fecha: new Date().toISOString().slice(0, 16),
+          linea: "Flynn",
+          turno: "M",
+          area: "Empaque",
+          equipo: "",
+          motivo: "",
+          tipoParada: "No planificada",
+          criticidad: "B",
+          codigoFalla: "",
+          causaRaiz: "",
+          repuestos: "",
+          costoARS: 0,
+          downtimeMin: 0,
+        },
+      ],
+    }));
+  };
 
   const addOTCorrectiva = () => {
     setState((s) => ({
@@ -429,8 +258,8 @@ function App() {
         {
           id: crypto.randomUUID(),
           fecha: new Date().toISOString().slice(0, 10),
-          linea: "FLYNN",
-          turno: "Mañana",
+          linea: "Flynn",
+          turno: "M",
           equipo: "",
           tipo: "Correctivo",
           estado: "En curso",
@@ -455,8 +284,8 @@ function App() {
           id: crypto.randomUUID(),
           fecha: new Date().toISOString().slice(0, 10),
           fechaEjec: "",
-          linea: "FLYNN",
-          turno: "Mañana",
+          linea: "Flynn",
+          turno: "M",
           equipo: "",
           tipo: "Preventivo",
           estado: "Planificada",
@@ -472,6 +301,7 @@ function App() {
     }));
   };
 
+  // NUEVO: Producción y Economía
   const addProduccion = () => {
     setState((s) => ({
       ...s,
@@ -480,31 +310,31 @@ function App() {
         {
           id: crypto.randomUUID(),
           fecha: new Date().toISOString().slice(0, 10),
-          turno: "Mañana",
-          sector: "CHOCOLATE",
-          linea: "CV1000-1",
+          turno: "M",
+          sector: "",
+          linea: "",
           kgPlan: 0,
           kgProd: 0,
+          cumpPlan: 0,
           kgReproceso: 0,
           kgDecomiso: 0,
-          cumpPlan: 0,
           tiempoParadaMin: 0,
-          supervisor: "ALLOI",
+          supervisor: "",
+          novedades: "",
         },
       ],
     }));
   };
 
   const addEconomia = () => {
-    const hoyKey = monthKey(state.periodoDesde) || new Date().toISOString().slice(0, 7);
     setState((s) => ({
       ...s,
       economia: [
         ...s.economia,
         {
           id: crypto.randomUUID(),
-          periodo: hoyKey, // yyyy-MM
-          sector: "CHOCOLATE",
+          periodo: new Date().toISOString().slice(0, 7), // yyyy-MM
+          sector: "",
           gastoMantenimientoUSD: 0,
           costoEnergiaUSD: 0,
         },
@@ -512,35 +342,39 @@ function App() {
     }));
   };
 
-  // ======= IMPORT / EXPORT JSON =======
+  const fileInputRef = useRef(null);
+  const fileProdCsvRef = useRef(null);
 
-  const jsonInputRef = useRef(null);
-  const csvInputRef = useRef(null);
-
-  const onImportJson = (e) => {
+  const onImport = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const data = JSON.parse(String(reader.result));
-        setState(normalizeState(data));
+        setState((s) => ({
+          ...s,
+          ...data,
+          paradas: data.paradas ?? [],
+          ots: data.ots ?? [],
+          produccion: data.produccion ?? [],
+          economia: data.economia ?? [],
+        }));
       } catch (err) {
-        alert("Archivo JSON inválido");
+        alert("Archivo inválido");
       }
     };
     reader.readAsText(file);
-    if (jsonInputRef.current) jsonInputRef.current.value = "";
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const resetData = () => {
     if (!confirm("¿Vaciar todos los datos del dashboard?")) return;
-    localStorage.removeItem("kpi-mantenimiento-georgalos-v3");
+    localStorage.removeItem("kpi-mantenimiento-georgalos-v2");
     location.reload();
   };
 
-  // ======= IMPORTACIÓN CSV PRODUCCIÓN =======
-
+  // NUEVO: Importar CSV de producción
   const onImportProduccionCsv = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -568,6 +402,7 @@ function App() {
         const idxKgPlan = idx("KG PLAN");
         const idxLinea = idx("LINEA");
         const idxKgProd = idx("KG PRODUCIDOS");
+        const idxNovedades = idx("NOVEDADES");
         const idxCumpPlan = idx("CUMP PLAN %");
         const idxKgReproceso = idx("KG REPROCESO");
         const idxKgDecomiso = idx("KG DECOMISO");
@@ -587,12 +422,12 @@ function App() {
           idxSupervisor === -1
         ) {
           alert(
-            "El CSV no tiene todos los encabezados requeridos.\nNecesarios: FECHA, TURNO, SECTOR, KG PLAN, LINEA, KG PRODUCIDOS, KG REPROCESO, KG DECOMISO, TIEMPO PARADA POR AVERIAS, SUPERVISOR (CUMP PLAN % opcional)."
+            "El CSV no tiene todos los encabezados requeridos.\nRequeridos: FECHA, TURNO, SECTOR, KG PLAN, LINEA, KG PRODUCIDOS, KG REPROCESO, KG DECOMISO, TIEMPO PARADA POR AVERIAS, SUPERVISOR. (NOVEDADES y CUMP PLAN % son opcionales)."
           );
           return;
         }
 
-        const registros = [];
+        const nuevos = [];
 
         for (let i = 1; i < lines.length; i++) {
           const row = lines[i].split(delimiter);
@@ -602,7 +437,6 @@ function App() {
             idxCol >= 0 && idxCol < row.length ? row[idxCol].trim() : "";
 
           let rawFecha = val(idxFecha);
-          // Puede venir "2025-01-13 00:00:00" o "13/01/2025"
           let fecha = "";
           if (/^\d{4}-\d{2}-\d{2}/.test(rawFecha)) {
             fecha = rawFecha.slice(0, 10);
@@ -610,31 +444,30 @@ function App() {
             const [dd, mm, yyyy] = rawFecha.split("/");
             fecha = `${yyyy}-${mm}-${dd}`;
           } else {
-            // último recurso: que el browser intente parsear
             const d = new Date(rawFecha);
             if (!isNaN(d.getTime())) {
               fecha = d.toISOString().slice(0, 10);
             }
           }
-          if (!fecha) continue; // si no podemos parsear fecha, saltamos
+          if (!fecha) continue;
 
           const turnoRaw = val(idxTurno).toUpperCase();
-          let turno = "Mañana";
-          if (turnoRaw.startsWith("T")) turno = "Tarde";
-          else if (turnoRaw.startsWith("N")) turno = "Noche";
+          let turno = "M";
+          if (turnoRaw.startsWith("T")) turno = "T";
+          else if (turnoRaw.startsWith("N")) turno = "N";
 
-          const sector = val(idxSector).trim().toUpperCase();
-          const linea = val(idxLinea).trim();
-
+          const sector = val(idxSector);
+          const linea = val(idxLinea);
           const kgPlan = parseNumero(val(idxKgPlan));
           const kgProd = parseNumero(val(idxKgProd));
           const kgReproceso = parseNumero(val(idxKgReproceso));
           const kgDecomiso = parseNumero(val(idxKgDecomiso));
           const cumpPlan = idxCumpPlan !== -1 ? parseNumero(val(idxCumpPlan)) : 0;
           const tiempoParadaMin = parseNumero(val(idxTiempoParada));
-          const supervisor = val(idxSupervisor).trim().toUpperCase();
+          const supervisor = val(idxSupervisor);
+          const novedades = idxNovedades !== -1 ? val(idxNovedades) : "";
 
-          registros.push({
+          nuevos.push({
             id: crypto.randomUUID(),
             fecha,
             turno,
@@ -642,42 +475,39 @@ function App() {
             linea,
             kgPlan,
             kgProd,
+            cumpPlan,
             kgReproceso,
             kgDecomiso,
-            cumpPlan,
             tiempoParadaMin,
-            supervisor: supervisor || "ALLOI",
+            supervisor,
+            novedades,
           });
         }
 
-        if (registros.length === 0) {
+        if (nuevos.length === 0) {
           alert("No se encontraron filas válidas en el CSV.");
           return;
         }
 
         setState((s) => ({
           ...s,
-          produccion: [...s.produccion, ...registros],
+          produccion: [...s.produccion, ...nuevos],
         }));
-
-        alert(`Se importaron ${registros.length} filas de producción.`);
+        alert(`Se importaron ${nuevos.length} filas de producción.`);
       } catch (err) {
         console.error(err);
         alert("Error al leer el CSV de producción.");
       }
     };
     reader.readAsText(file, "utf-8");
-    if (csvInputRef.current) csvInputRef.current.value = "";
+    if (fileProdCsvRef.current) fileProdCsvRef.current.value = "";
   };
 
-  // ======= NOTAS RÁPIDAS =======
-
+  // Notas
   const [notas, setNotas] = useState(localStorage.getItem("kpi-notas") || "");
   useEffect(() => {
     localStorage.setItem("kpi-notas", notas);
   }, [notas]);
-
-  // ======= RENDER =======
 
   return (
     <div className="app-root">
@@ -696,8 +526,7 @@ function App() {
               KPIs de Mantenimiento — Georgalos
             </h1>
             <p style={{ fontSize: "0.8rem", color: "#6b7280" }}>
-              MTBF / MTTR / Disponibilidad, Preventivo vs Correctivo, Backlog + Producción, OEE y
-              Económicos (USD/ton)
+              MTBF, MTTR, Disponibilidad, % Preventivo/Correctivo, Cumplimiento, Backlog + Producción y Económicos
             </p>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
@@ -710,11 +539,11 @@ function App() {
             <label className="btn">
               Importar JSON
               <input
-                ref={jsonInputRef}
+                ref={fileInputRef}
                 type="file"
                 accept="application/json"
                 style={{ display: "none" }}
-                onChange={onImportJson}
+                onChange={onImport}
               />
             </label>
             <button className="btn" onClick={resetData}>
@@ -723,7 +552,7 @@ function App() {
           </div>
         </header>
 
-        {/* FILTROS */}
+        {/* Filtros */}
         <section
           style={{
             display: "grid",
@@ -764,7 +593,7 @@ function App() {
               </div>
               <div style={{ gridColumn: "1 / -1" }}>
                 <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>
-                  Horas planificadas (mant.)
+                  Horas planificadas
                 </div>
                 <input
                   type="number"
@@ -792,22 +621,6 @@ function App() {
               }}
             >
               <div>
-                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Sector</div>
-                <select
-                  value={state.filtroSector}
-                  onChange={(e) =>
-                    setState((s) => ({ ...s, filtroSector: e.target.value }))
-                  }
-                >
-                  <option value="Todos">Todos</option>
-                  {SECTORES.map((sec) => (
-                    <option key={sec} value={sec}>
-                      {sec}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
                 <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Línea</div>
                 <select
                   value={state.filtroLinea}
@@ -834,25 +647,7 @@ function App() {
                   <option value="Todos">Todos</option>
                   {TURNOS.map((t) => (
                     <option key={t} value={t}>
-                      {turnoLabel(t)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>
-                  Supervisor (prod.)
-                </div>
-                <select
-                  value={state.filtroSupervisor}
-                  onChange={(e) =>
-                    setState((s) => ({ ...s, filtroSupervisor: e.target.value }))
-                  }
-                >
-                  <option value="Todos">Todos</option>
-                  {SUPERVISORES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
+                      {t}
                     </option>
                   ))}
                 </select>
@@ -891,16 +686,16 @@ function App() {
           </div>
         </section>
 
-        {/* KPIs MANTENIMIENTO */}
+        {/* KPIs */}
         <section className="kpi-grid" style={{ marginBottom: "1rem" }}>
-          <KpiCard title="MTBF (mant.)" value={`${formatNumber(MTBF_h)} h`} hint={`${fallas} fallas`} />
+          <KpiCard title="MTBF" value={`${formatNumber(MTBF_h)} h`} hint={`${fallas} fallas`} />
           <KpiCard
-            title="MTTR (mant.)"
+            title="MTTR"
             value={`${formatNumber(MTTR_h)} h`}
             hint={`${formatNumber(downtimeHoras)} h paro`}
           />
           <KpiCard
-            title="Disponibilidad (mant.)"
+            title="Disponibilidad"
             value={`${formatNumber(disponibilidad * 100)} %`}
             hint={`${formatNumber(uptimeHoras)} h uptime`}
           />
@@ -921,78 +716,7 @@ function App() {
           />
         </section>
 
-        {/* KPIs PRODUCCIÓN */}
-        <section className="kpi-grid" style={{ marginBottom: "1rem" }}>
-          <KpiCard
-            title="MTBF (prod.)"
-            value={`${formatNumber(MTBF_prod_h)} h`}
-            hint={`${fallasProd} turnos con averías`}
-          />
-          <KpiCard
-            title="MTTR (prod.)"
-            value={`${formatNumber(MTTR_prod_h)} h`}
-            hint={`${formatNumber(downtimeProdMin / 60)} h paro`}
-          />
-          <KpiCard
-            title="Disponibilidad (prod.)"
-            value={`${formatNumber(dispProd * 100)} %`}
-            hint={`${formatNumber(horasTrabajadasProd)} h trabajadas`}
-          />
-          <KpiCard
-            title="Eficiencia (kg prod / plan)"
-            value={`${formatNumber(perfProd * 100)} %`}
-            hint={`${formatNumber(totalKgProd)} / ${formatNumber(totalKgPlan)} kg`}
-          />
-          <KpiCard
-            title="OEE (prod.)"
-            value={`${formatNumber(OEE_prod * 100)} %`}
-            hint={`Disp·Perf·Calidad`}
-          />
-          <KpiCard
-            title="Calidad (kg buenos)"
-            value={
-              totalKgProd > 0
-                ? `${formatNumber(
-                    ((totalKgProd - totalKgReproceso - totalKgDecomiso) /
-                      totalKgProd) *
-                      100
-                  )} %`
-                : "- %"
-            }
-            hint={`Reproc: ${formatNumber(
-              totalKgReproceso
-            )} kg · Decom: ${formatNumber(totalKgDecomiso)} kg`}
-          />
-        </section>
-
-        {/* KPIs POR SUPERVISOR */}
-        <section className="card" style={{ marginBottom: "1.5rem" }}>
-          <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>
-            KPIs por Supervisor (Producción)
-          </h2>
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Supervisor</th>
-                  <th>Eficiencia (%)</th>
-                  <th>OEE (%)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {kpisSupervisores.map((k) => (
-                  <tr key={k.supervisor}>
-                    <td>{k.supervisor}</td>
-                    <td>{formatNumber(k.eficiencia)}</td>
-                    <td>{formatNumber(k.oee)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        {/* PATRONES FRECUENTES (Flynn) */}
+        {/* Patrones */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>
             Patrones frecuentes (Flynn)
@@ -1016,12 +740,7 @@ function App() {
               >
                 <div style={{ color: "#6b7280" }}>{r.label}</div>
                 <div
-                  style={{
-                    fontSize: "1.1rem",
-                    fontWeight: 600,
-                    lineHeight: 1,
-                    marginTop: 4,
-                  }}
+                  style={{ fontSize: "1.1rem", fontWeight: 600, lineHeight: 1, marginTop: 4 }}
                 >
                   {r.conteo} eventos
                 </div>
@@ -1033,7 +752,10 @@ function App() {
           </div>
         </section>
 
-        {/* OTs CORRECTIVAS */}
+        {/* ⚠️ CUADRO 1: Eventos de Parada — ELIMINADO DEL UI ⚠️ */}
+        {/* Solo dejamos la lógica para MTTR/MTBF, pero ya no mostramos la tabla de carga. */}
+
+        {/* CUADRO 2: OTs Correctivas */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <div
             style={{
@@ -1107,9 +829,7 @@ function App() {
                         }
                       >
                         {LINEAS.map((l) => (
-                          <option key={l} value={l}>
-                            {l}
-                          </option>
+                          <option key={l}>{l}</option>
                         ))}
                       </select>
                     </td>
@@ -1126,16 +846,14 @@ function App() {
                         }
                       >
                         {TURNOS.map((t) => (
-                          <option key={t} value={t}>
-                            {turnoLabel(t)}
-                          </option>
+                          <option key={t}>{t}</option>
                         ))}
                       </select>
                     </td>
                     <td>
                       <input
                         type="text"
-                        value={o.equipo || ""}
+                        value={o.equipo}
                         onChange={(e) =>
                           setState((s) => ({
                             ...s,
@@ -1177,9 +895,7 @@ function App() {
                         }
                       >
                         {CRITICIDAD.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
+                          <option key={c}>{c}</option>
                         ))}
                       </select>
                     </td>
@@ -1303,7 +1019,7 @@ function App() {
           </div>
         </section>
 
-        {/* PREVENTIVOS */}
+        {/* CUADRO 3: Preventivos */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <div
             style={{
@@ -1386,16 +1102,14 @@ function App() {
                         }
                       >
                         {LINEAS.map((l) => (
-                          <option key={l} value={l}>
-                            {l}
-                          </option>
+                          <option key={l}>{l}</option>
                         ))}
                       </select>
                     </td>
                     <td>
                       <input
                         type="text"
-                        value={o.equipo || ""}
+                        value={o.equipo}
                         onChange={(e) =>
                           setState((s) => ({
                             ...s,
@@ -1473,13 +1187,7 @@ function App() {
               </tbody>
             </table>
           </div>
-          <div
-            style={{
-              marginTop: "0.5rem",
-              fontSize: "0.8rem",
-              color: "#374151",
-            }}
-          >
+          <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#374151" }}>
             <span className="badge">
               Planificados: {otsPrevFiltradas.length}
             </span>{" "}
@@ -1499,7 +1207,7 @@ function App() {
           </div>
         </section>
 
-        {/* PRODUCCIÓN — CARGA + IMPORT CSV */}
+        {/* NUEVO: Producción — carga + importación CSV */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <div
             style={{
@@ -1512,7 +1220,7 @@ function App() {
             }}
           >
             <h2 style={{ fontSize: "0.95rem", fontWeight: 500 }}>
-              Producción — Carga (base para OEE)
+              Producción — Importación CSV
             </h2>
             <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
               <button className="btn btn-primary" onClick={addProduccion}>
@@ -1520,12 +1228,12 @@ function App() {
               </button>
               <button
                 className="btn"
-                onClick={() => csvInputRef.current && csvInputRef.current.click()}
+                onClick={() => fileProdCsvRef.current && fileProdCsvRef.current.click()}
               >
                 Importar producción CSV
               </button>
               <input
-                ref={csvInputRef}
+                ref={fileProdCsvRef}
                 type="file"
                 accept=".csv,text/csv"
                 style={{ display: "none" }}
@@ -1543,20 +1251,20 @@ function App() {
                   <th>Línea</th>
                   <th>Kg plan</th>
                   <th>Kg producidos</th>
-                  <th>% cump plan</th>
+                  <th>Cump. plan %</th>
                   <th>Kg reproceso</th>
                   <th>Kg decomiso</th>
-                  <th>Tiempo parada averías (min)</th>
+                  <th>Tiempo parada (min)</th>
                   <th>Supervisor</th>
+                  <th>Novedades</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
                 {state.produccion.length === 0 && (
                   <tr>
-                    <td colSpan={12} style={{ padding: "0.75rem", color: "#6b7280" }}>
-                      Sin datos de producción aún. Cargá manualmente o importá un CSV desde el
-                      sistema de planta.
+                    <td colSpan={13} style={{ padding: "0.75rem", color: "#6b7280" }}>
+                      Sin datos de producción aún. Importá el CSV desde el sistema o cargá un turno manualmente.
                     </td>
                   </tr>
                 )}
@@ -1589,45 +1297,28 @@ function App() {
                         }
                       >
                         {TURNOS.map((t) => (
-                          <option key={t} value={t}>
-                            {turnoLabel(t)}
-                          </option>
+                          <option key={t}>{t}</option>
                         ))}
                       </select>
                     </td>
                     <td>
-                      <select
-                        value={r.sector}
-                        onChange={(e) => {
-                          const nuevoSector = e.target.value;
+                      <input
+                        type="text"
+                        value={r.sector || ""}
+                        onChange={(e) =>
                           setState((s) => ({
                             ...s,
                             produccion: s.produccion.map((x) =>
-                              x.id === r.id
-                                ? {
-                                    ...x,
-                                    sector: nuevoSector,
-                                    linea: LINEAS_POR_SECTOR[nuevoSector]?.includes(
-                                      x.linea
-                                    )
-                                      ? x.linea
-                                      : "",
-                                  }
-                                : x
+                              x.id === r.id ? { ...x, sector: e.target.value } : x
                             ),
-                          }));
-                        }}
-                      >
-                        {SECTORES.map((sec) => (
-                          <option key={sec} value={sec}>
-                            {sec}
-                          </option>
-                        ))}
-                      </select>
+                          }))
+                        }
+                      />
                     </td>
                     <td>
-                      <select
-                        value={r.linea}
+                      <input
+                        type="text"
+                        value={r.linea || ""}
                         onChange={(e) =>
                           setState((s) => ({
                             ...s,
@@ -1636,14 +1327,7 @@ function App() {
                             ),
                           }))
                         }
-                      >
-                        <option value="">-</option>
-                        {(LINEAS_POR_SECTOR[r.sector] || []).map((l) => (
-                          <option key={l} value={l}>
-                            {l}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </td>
                     <td>
                       <input
@@ -1748,8 +1432,9 @@ function App() {
                       />
                     </td>
                     <td>
-                      <select
-                        value={r.supervisor}
+                      <input
+                        type="text"
+                        value={r.supervisor || ""}
                         onChange={(e) =>
                           setState((s) => ({
                             ...s,
@@ -1760,13 +1445,23 @@ function App() {
                             ),
                           }))
                         }
-                      >
-                        {SUPERVISORES.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
+                      />
+                    </td>
+                    <td>
+                      <textarea
+                        rows={1}
+                        value={r.novedades || ""}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id
+                                ? { ...x, novedades: e.target.value }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
                     </td>
                     <td>
                       <button
@@ -1788,7 +1483,7 @@ function App() {
           </div>
         </section>
 
-        {/* DATOS ECONÓMICOS */}
+        {/* NUEVO: Datos Económicos */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <div
             style={{
@@ -1800,7 +1495,7 @@ function App() {
             }}
           >
             <h2 style={{ fontSize: "0.95rem", fontWeight: 500 }}>
-              Datos Económicos Mensuales (USD)
+              Datos Económicos (carga manual mensual)
             </h2>
             <button className="btn btn-primary" onClick={addEconomia}>
               + Agregar registro
@@ -1810,25 +1505,22 @@ function App() {
             <table>
               <thead>
                 <tr>
-                  <th>Periodo (mes)</th>
-                  <th>Sector</th>
-                  <th>Gasto mant. USD</th>
-                  <th>Costo energía USD</th>
-                  <th>Ton producidas sector</th>
-                  <th>Mant. USD/ton</th>
-                  <th>Energía USD/ton</th>
+                  <th>Periodo (AAAA-MM)</th>
+                  <th>Sector / Línea</th>
+                  <th>Gasto mantenimiento (USD)</th>
+                  <th>Costo energía (USD)</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {economiaCalculada.length === 0 && (
+                {state.economia.length === 0 && (
                   <tr>
-                    <td colSpan={8} style={{ padding: "0.75rem", color: "#6b7280" }}>
+                    <td colSpan={5} style={{ padding: "0.75rem", color: "#6b7280" }}>
                       Sin registros económicos aún. Cargá un registro por mes y sector.
                     </td>
                   </tr>
                 )}
-                {economiaCalculada.map((e) => (
+                {state.economia.map((e) => (
                   <tr key={e.id}>
                     <td>
                       <input
@@ -1845,8 +1537,9 @@ function App() {
                       />
                     </td>
                     <td>
-                      <select
-                        value={e.sector}
+                      <input
+                        type="text"
+                        value={e.sector || ""}
                         onChange={(ev) =>
                           setState((s) => ({
                             ...s,
@@ -1855,13 +1548,7 @@ function App() {
                             ),
                           }))
                         }
-                      >
-                        {SECTORES.map((sec) => (
-                          <option key={sec} value={sec}>
-                            {sec}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </td>
                     <td>
                       <input
@@ -1903,9 +1590,6 @@ function App() {
                         }
                       />
                     </td>
-                    <td>{formatNumber(e.toneladasSector, 3)}</td>
-                    <td>{formatNumber(e.mantPorTon, 2)}</td>
-                    <td>{formatNumber(e.enerPorTon, 2)}</td>
                     <td>
                       <button
                         className="btn"
@@ -1926,15 +1610,9 @@ function App() {
           </div>
         </section>
 
-        {/* NOTAS */}
+        {/* Notas */}
         <section className="card" style={{ marginBottom: "2rem" }}>
-          <h2
-            style={{
-              fontSize: "0.95rem",
-              fontWeight: 500,
-              marginBottom: "0.5rem",
-            }}
-          >
+          <h2 style={{ fontSize: "0.95rem", fontWeight: 500, marginBottom: "0.5rem" }}>
             Notas rápidas
           </h2>
           <textarea
@@ -1954,7 +1632,7 @@ function App() {
             paddingBottom: "1.5rem",
           }}
         >
-          Tablero local (localStorage). Siguiente etapa: Firestore/Firebase para multiusuario.
+          Tablero local (localStorage). Próximo paso: Firestore + usuarios de planta.
         </footer>
       </div>
     </div>
