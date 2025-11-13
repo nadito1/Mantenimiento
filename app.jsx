@@ -1,10 +1,9 @@
 const { useState, useEffect, useMemo, useRef } = React;
 
-// ================== CONSTANTES / CATÁLOGOS ==================
-
 const MINUTOS_TURNO = 390;
 
-// Utilidades
+// ================== UTILIDADES ==================
+
 const formatNumber = (n, digits = 2) =>
   isFinite(n) ? n.toLocaleString("es-AR", { maximumFractionDigits: digits }) : "-";
 
@@ -18,14 +17,29 @@ const download = (filename, data) => {
   URL.revokeObjectURL(url);
 };
 
-// Supervisores
+const parseNumero = (str) => {
+  if (str == null) return 0;
+  const cleaned = String(str).trim().replace(/\./g, "").replace(",", ".");
+  const n = Number(cleaned);
+  return isFinite(n) ? n : 0;
+};
+
+const monthKey = (dateStr) => {
+  if (!dateStr) return "";
+  const d = new Date(dateStr + "T00:00");
+  if (isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+};
+
+// ================== CATÁLOGOS ==================
+
 const SUPERVISORES = ["ALLOI", "AVILA", "BOERIS"];
 
-// Turnos (guardamos nombre completo, mostramos inicial)
 const TURNOS = ["Mañana", "Tarde", "Noche"];
 const turnoLabel = (t) => (t ? t[0] : "");
 
-// Sectores
 const SECTORES = [
   "CHOCOLATE",
   "ALFAJOR",
@@ -40,7 +54,6 @@ const SECTORES = [
   "CONFITE",
 ];
 
-// Líneas por sector
 const LINEAS_POR_SECTOR = {
   CHOCOLATE: ["CV1000-1", "CV1000-2", "CV1000-3", "DELVER", "CHISPAS", "MANGA"],
   TURRON: ["NAMUR", "TURRON FIESTA", "CROCANTE", "ESTUCHADO", "TURRON ARTESANAL"],
@@ -55,10 +68,8 @@ const LINEAS_POR_SECTOR = {
   ARTESANAL: [],
 };
 
-// Helper: todas las líneas
 const LINEAS = Array.from(new Set(Object.values(LINEAS_POR_SECTOR).flat()));
 
-// Áreas internas (por ahora igual que antes)
 const AREAS = [
   "Estuchadora",
   "Balanza",
@@ -67,13 +78,55 @@ const AREAS = [
   "Empaque",
   "Servicios",
 ];
+
 const TIPOS_PARADA = ["No planificada", "Planificada", "Falta de insumos"];
 const CRITICIDAD = ["A", "B", "C"];
 
-// Helpers de fecha
+// ================== FECHAS ==================
+
 const toDate = (s) => new Date(s);
 const inRange = (d, desde, hasta) =>
   d >= new Date(desde + "T00:00") && d <= new Date(hasta + "T23:59:59");
+
+// ================== ESTADO INICIAL / NORMALIZACIÓN ==================
+
+const buildDefaultState = () => {
+  const hoy = new Date();
+  const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
+    .toISOString()
+    .slice(0, 10);
+  const ultimoDiaMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0)
+    .toISOString()
+    .slice(0, 10);
+
+  return {
+    periodoDesde: primerDiaMes,
+    periodoHasta: ultimoDiaMes,
+    horasPlanificadas: 720,
+    capacidadHHsemana: 160,
+    filtroLinea: "Todas",
+    filtroTurno: "Todos",
+    filtroSector: "Todos",
+    filtroSupervisor: "Todos",
+    paradas: [],
+    ots: [],
+    produccion: [],
+    economia: [],
+  };
+};
+
+const normalizeState = (raw) => {
+  const base = buildDefaultState();
+  if (!raw || typeof raw !== "object") return base;
+  return {
+    ...base,
+    ...raw,
+    paradas: raw.paradas || [],
+    ots: raw.ots || [],
+    produccion: raw.produccion || [],
+    economia: raw.economia || [],
+  };
+};
 
 // ================== COMPONENTE PRINCIPAL ==================
 
@@ -82,39 +135,20 @@ function App() {
     const saved = localStorage.getItem("kpi-mantenimiento-georgalos-v3");
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        return normalizeState(parsed);
       } catch (e) {
         console.error("Error leyendo localStorage", e);
       }
     }
-    const hoy = new Date();
-    const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
-      .toISOString()
-      .slice(0, 10);
-    const ultimoDiaMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0)
-      .toISOString()
-      .slice(0, 10);
-    return {
-      periodoDesde: primerDiaMes,
-      periodoHasta: ultimoDiaMes,
-      horasPlanificadas: 720,
-      capacidadHHsemana: 160,
-      filtroLinea: "Todas",
-      filtroTurno: "Todos",
-      filtroSector: "Todos",
-      filtroSupervisor: "Todos",
-      paradas: [],
-      ots: [],
-      produccion: [], // NUEVO: datos de producción
-    };
+    return buildDefaultState();
   });
 
-  // Persistencia
   useEffect(() => {
     localStorage.setItem("kpi-mantenimiento-georgalos-v3", JSON.stringify(state));
   }, [state]);
 
-  // ========== FILTROS POR PERÍODO ==========
+  // ======= FILTROS POR PERÍODO =======
 
   const paradasPeriodo = useMemo(
     () =>
@@ -140,7 +174,7 @@ function App() {
     [state.produccion, state.periodoDesde, state.periodoHasta]
   );
 
-  // ========== FILTROS POR LÍNEA / TURNO / SECTOR / SUPERVISOR ==========
+  // ======= FILTROS COMBINADOS =======
 
   const paradasFiltradas = useMemo(
     () =>
@@ -183,7 +217,6 @@ function App() {
     ]
   );
 
-  // Subconjuntos por tipo
   const otsCorrFiltradas = useMemo(
     () => otsFiltradas.filter((o) => o.tipo === "Correctivo"),
     [otsFiltradas]
@@ -193,7 +226,7 @@ function App() {
     [otsFiltradas]
   );
 
-  // ========== KPIs MANTENIMIENTO (paradas + OTs) ==========
+  // ======= KPIs MANTENIMIENTO (PARADAS + OTs) =======
 
   const downtimeTotalMin = useMemo(
     () => paradasFiltradas.reduce((acc, p) => acc + (Number(p.downtimeMin) || 0), 0),
@@ -229,7 +262,7 @@ function App() {
   const pctPrev = (otsPrev / otsTot) * 100;
   const pctCorr = (otsCorr / otsTot) * 100;
 
-  // ========== KPIs PRODUCCIÓN (producciónFiltrada) ==========
+  // ======= KPIs PRODUCCIÓN (USANDO CSV / CARGA) =======
 
   const totalKgPlan = produccionFiltrada.reduce(
     (acc, r) => acc + (Number(r.kgPlan) || 0),
@@ -260,14 +293,10 @@ function App() {
     (r) => (Number(r.tiempoParadaMin) || 0) > 0
   ).length;
 
-  const MTTR_prod_h =
-    fallasProd > 0 ? (downtimeProdMin / 60) / fallasProd : 0;
-  const MTBF_prod_h =
-    fallasProd > 0 ? (uptimeProdMin / 60) / fallasProd : 0;
+  const MTTR_prod_h = fallasProd > 0 ? (downtimeProdMin / 60) / fallasProd : 0;
+  const MTBF_prod_h = fallasProd > 0 ? (uptimeProdMin / 60) / fallasProd : 0;
 
-  const dispProd =
-    tiempoPlanTotalMin > 0 ? uptimeProdMin / tiempoPlanTotalMin : 0;
-
+  const dispProd = tiempoPlanTotalMin > 0 ? uptimeProdMin / tiempoPlanTotalMin : 0;
   const perfProd = totalKgPlan > 0 ? totalKgProd / totalKgPlan : 0;
   const calidadProd =
     totalKgProd > 0
@@ -275,10 +304,10 @@ function App() {
       : 0;
 
   const OEE_prod = dispProd * perfProd * calidadProd;
-
   const horasTrabajadasProd = uptimeProdMin / 60;
 
-  // KPIs por supervisor (sobre produccionPeriodo + filtros sector/línea/turno)
+  // ======= KPIs POR SUPERVISOR =======
+
   const kpisSupervisores = SUPERVISORES.map((sup) => {
     const filas = produccionPeriodo.filter((r) => {
       const okSup = r.supervisor === sup;
@@ -327,7 +356,7 @@ function App() {
     };
   });
 
-  // ========== PATRONES FLYNN (mantenimiento) ==========
+  // ======= PATRONES (SIGUEN BASADOS EN PARADAS, POR SI IMPORTÁS MÁS ADELANTE) =======
 
   const patrones = [
     {
@@ -365,32 +394,32 @@ function App() {
       .reduce((a, p) => a + (p.downtimeMin || 0), 0),
   }));
 
-  // ========== MANEJO FORMULARIOS ==========
+  // ======= DATOS ECONÓMICOS (MENSUALES, POR SECTOR) =======
 
-  const addParada = () => {
-    setState((s) => ({
-      ...s,
-      paradas: [
-        ...s.paradas,
-        {
-          id: crypto.randomUUID(),
-          fecha: new Date().toISOString().slice(0, 16),
-          linea: "FLYNN",
-          turno: "Mañana",
-          area: "Empaque",
-          equipo: "",
-          motivo: "",
-          tipoParada: "No planificada",
-          criticidad: "B",
-          codigoFalla: "",
-          causaRaiz: "",
-          repuestos: "",
-          costoARS: 0,
-          downtimeMin: 0,
-        },
-      ],
-    }));
-  };
+  const economiaCalculada = state.economia.map((e) => {
+    const toneladasSector = produccionPeriodo
+      .filter(
+        (r) =>
+          monthKey(r.fecha) === e.periodo &&
+          r.sector === e.sector
+      )
+      .reduce((a, r) => a + (Number(r.kgProd) || 0), 0) / 1000;
+
+    const mantUSD = Number(e.gastoMantenimientoUSD) || 0;
+    const enerUSD = Number(e.costoEnergiaUSD) || 0;
+
+    const mantPorTon = toneladasSector > 0 ? mantUSD / toneladasSector : 0;
+    const enerPorTon = toneladasSector > 0 ? enerUSD / toneladasSector : 0;
+
+    return {
+      ...e,
+      toneladasSector,
+      mantPorTon,
+      enerPorTon,
+    };
+  });
+
+  // ======= MANEJO FORMULARIOS =======
 
   const addOTCorrectiva = () => {
     setState((s) => ({
@@ -466,22 +495,42 @@ function App() {
     }));
   };
 
-  const fileInputRef = useRef(null);
+  const addEconomia = () => {
+    const hoyKey = monthKey(state.periodoDesde) || new Date().toISOString().slice(0, 7);
+    setState((s) => ({
+      ...s,
+      economia: [
+        ...s.economia,
+        {
+          id: crypto.randomUUID(),
+          periodo: hoyKey, // yyyy-MM
+          sector: "CHOCOLATE",
+          gastoMantenimientoUSD: 0,
+          costoEnergiaUSD: 0,
+        },
+      ],
+    }));
+  };
 
-  const onImport = (e) => {
+  // ======= IMPORT / EXPORT JSON =======
+
+  const jsonInputRef = useRef(null);
+  const csvInputRef = useRef(null);
+
+  const onImportJson = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const data = JSON.parse(String(reader.result));
-        setState(data);
+        setState(normalizeState(data));
       } catch (err) {
-        alert("Archivo inválido");
+        alert("Archivo JSON inválido");
       }
     };
     reader.readAsText(file);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (jsonInputRef.current) jsonInputRef.current.value = "";
   };
 
   const resetData = () => {
@@ -490,13 +539,145 @@ function App() {
     location.reload();
   };
 
-  // Notas
+  // ======= IMPORTACIÓN CSV PRODUCCIÓN =======
+
+  const onImportProduccionCsv = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = String(reader.result);
+        const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+        if (lines.length < 2) {
+          alert("CSV sin datos");
+          return;
+        }
+
+        const headerLine = lines[0];
+        const delimiter = headerLine.includes(";") ? ";" : ",";
+        const headers = headerLine
+          .split(delimiter)
+          .map((h) => h.trim().toUpperCase());
+
+        const idx = (name) => headers.indexOf(name);
+
+        const idxFecha = idx("FECHA");
+        const idxTurno = idx("TURNO");
+        const idxSector = idx("SECTOR");
+        const idxKgPlan = idx("KG PLAN");
+        const idxLinea = idx("LINEA");
+        const idxKgProd = idx("KG PRODUCIDOS");
+        const idxCumpPlan = idx("CUMP PLAN %");
+        const idxKgReproceso = idx("KG REPROCESO");
+        const idxKgDecomiso = idx("KG DECOMISO");
+        const idxTiempoParada = idx("TIEMPO PARADA POR AVERIAS");
+        const idxSupervisor = idx("SUPERVISOR");
+
+        if (
+          idxFecha === -1 ||
+          idxTurno === -1 ||
+          idxSector === -1 ||
+          idxKgPlan === -1 ||
+          idxLinea === -1 ||
+          idxKgProd === -1 ||
+          idxKgReproceso === -1 ||
+          idxKgDecomiso === -1 ||
+          idxTiempoParada === -1 ||
+          idxSupervisor === -1
+        ) {
+          alert(
+            "El CSV no tiene todos los encabezados requeridos.\nNecesarios: FECHA, TURNO, SECTOR, KG PLAN, LINEA, KG PRODUCIDOS, KG REPROCESO, KG DECOMISO, TIEMPO PARADA POR AVERIAS, SUPERVISOR (CUMP PLAN % opcional)."
+          );
+          return;
+        }
+
+        const registros = [];
+
+        for (let i = 1; i < lines.length; i++) {
+          const row = lines[i].split(delimiter);
+          if (row.length === 0) continue;
+
+          const val = (idxCol) =>
+            idxCol >= 0 && idxCol < row.length ? row[idxCol].trim() : "";
+
+          let rawFecha = val(idxFecha);
+          // Puede venir "2025-01-13 00:00:00" o "13/01/2025"
+          let fecha = "";
+          if (/^\d{4}-\d{2}-\d{2}/.test(rawFecha)) {
+            fecha = rawFecha.slice(0, 10);
+          } else if (/^\d{2}\/\d{2}\/\d{4}/.test(rawFecha)) {
+            const [dd, mm, yyyy] = rawFecha.split("/");
+            fecha = `${yyyy}-${mm}-${dd}`;
+          } else {
+            // último recurso: que el browser intente parsear
+            const d = new Date(rawFecha);
+            if (!isNaN(d.getTime())) {
+              fecha = d.toISOString().slice(0, 10);
+            }
+          }
+          if (!fecha) continue; // si no podemos parsear fecha, saltamos
+
+          const turnoRaw = val(idxTurno).toUpperCase();
+          let turno = "Mañana";
+          if (turnoRaw.startsWith("T")) turno = "Tarde";
+          else if (turnoRaw.startsWith("N")) turno = "Noche";
+
+          const sector = val(idxSector).trim().toUpperCase();
+          const linea = val(idxLinea).trim();
+
+          const kgPlan = parseNumero(val(idxKgPlan));
+          const kgProd = parseNumero(val(idxKgProd));
+          const kgReproceso = parseNumero(val(idxKgReproceso));
+          const kgDecomiso = parseNumero(val(idxKgDecomiso));
+          const cumpPlan = idxCumpPlan !== -1 ? parseNumero(val(idxCumpPlan)) : 0;
+          const tiempoParadaMin = parseNumero(val(idxTiempoParada));
+          const supervisor = val(idxSupervisor).trim().toUpperCase();
+
+          registros.push({
+            id: crypto.randomUUID(),
+            fecha,
+            turno,
+            sector,
+            linea,
+            kgPlan,
+            kgProd,
+            kgReproceso,
+            kgDecomiso,
+            cumpPlan,
+            tiempoParadaMin,
+            supervisor: supervisor || "ALLOI",
+          });
+        }
+
+        if (registros.length === 0) {
+          alert("No se encontraron filas válidas en el CSV.");
+          return;
+        }
+
+        setState((s) => ({
+          ...s,
+          produccion: [...s.produccion, ...registros],
+        }));
+
+        alert(`Se importaron ${registros.length} filas de producción.`);
+      } catch (err) {
+        console.error(err);
+        alert("Error al leer el CSV de producción.");
+      }
+    };
+    reader.readAsText(file, "utf-8");
+    if (csvInputRef.current) csvInputRef.current.value = "";
+  };
+
+  // ======= NOTAS RÁPIDAS =======
+
   const [notas, setNotas] = useState(localStorage.getItem("kpi-notas") || "");
   useEffect(() => {
     localStorage.setItem("kpi-notas", notas);
   }, [notas]);
 
-  // ========== RENDER ==========
+  // ======= RENDER =======
 
   return (
     <div className="app-root">
@@ -515,8 +696,8 @@ function App() {
               KPIs de Mantenimiento — Georgalos
             </h1>
             <p style={{ fontSize: "0.8rem", color: "#6b7280" }}>
-              MTBF, MTTR, Disponibilidad, % Preventivo/Correctivo, Cumplimiento, Backlog +
-              Producción y OEE por sector / supervisor
+              MTBF / MTTR / Disponibilidad, Preventivo vs Correctivo, Backlog + Producción, OEE y
+              Económicos (USD/ton)
             </p>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
@@ -529,11 +710,11 @@ function App() {
             <label className="btn">
               Importar JSON
               <input
-                ref={fileInputRef}
+                ref={jsonInputRef}
                 type="file"
                 accept="application/json"
                 style={{ display: "none" }}
-                onChange={onImport}
+                onChange={onImportJson}
               />
             </label>
             <button className="btn" onClick={resetData}>
@@ -542,7 +723,7 @@ function App() {
           </div>
         </header>
 
-        {/* Filtros */}
+        {/* FILTROS */}
         <section
           style={{
             display: "grid",
@@ -745,7 +926,7 @@ function App() {
           <KpiCard
             title="MTBF (prod.)"
             value={`${formatNumber(MTBF_prod_h)} h`}
-            hint={`${fallasProd} fallas (prod.)`}
+            hint={`${fallasProd} turnos con averías`}
           />
           <KpiCard
             title="MTTR (prod.)"
@@ -787,7 +968,7 @@ function App() {
         {/* KPIs POR SUPERVISOR */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>
-            KPIs por Supervisor (producción)
+            KPIs por Supervisor (Producción)
           </h2>
           <div className="table-scroll">
             <table>
@@ -811,7 +992,7 @@ function App() {
           </div>
         </section>
 
-        {/* Patrones */}
+        {/* PATRONES FRECUENTES (Flynn) */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>
             Patrones frecuentes (Flynn)
@@ -852,262 +1033,7 @@ function App() {
           </div>
         </section>
 
-        {/* CUADRO 1: Paradas */}
-        <section className="card" style={{ marginBottom: "1.5rem" }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: "0.75rem",
-              gap: "0.75rem",
-            }}
-          >
-            <h2 style={{ fontSize: "0.95rem", fontWeight: 500 }}>Eventos de Parada</h2>
-            <button className="btn btn-primary" onClick={addParada}>
-              + Agregar
-            </button>
-          </div>
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Fecha y hora</th>
-                  <th>Línea</th>
-                  <th>Turno</th>
-                  <th>Área</th>
-                  <th>Equipo</th>
-                  <th>Tipo</th>
-                  <th>Motivo</th>
-                  <th>Crit.</th>
-                  <th>Downtime (min)</th>
-                  <th>Costo ARS</th>
-                  <th>Código falla</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {paradasFiltradas.length === 0 && (
-                  <tr>
-                    <td colSpan={12} style={{ padding: "0.75rem", color: "#6b7280" }}>
-                      Sin paradas en el filtro actual.
-                    </td>
-                  </tr>
-                )}
-                {paradasFiltradas.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <input
-                        type="datetime-local"
-                        value={p.fecha}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            paradas: s.paradas.map((x) =>
-                              x.id === p.id ? { ...x, fecha: e.target.value } : x
-                            ),
-                          }))
-                        }
-                      />
-                    </td>
-                    <td>
-                      <select
-                        value={p.linea}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            paradas: s.paradas.map((x) =>
-                              x.id === p.id ? { ...x, linea: e.target.value } : x
-                            ),
-                          }))
-                        }
-                      >
-                        {LINEAS.map((l) => (
-                          <option key={l} value={l}>
-                            {l}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <select
-                        value={p.turno}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            paradas: s.paradas.map((x) =>
-                              x.id === p.id ? { ...x, turno: e.target.value } : x
-                            ),
-                          }))
-                        }
-                      >
-                        {TURNOS.map((t) => (
-                          <option key={t} value={t}>
-                            {turnoLabel(t)}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <select
-                        value={p.area}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            paradas: s.paradas.map((x) =>
-                              x.id === p.id ? { ...x, area: e.target.value } : x
-                            ),
-                          }))
-                        }
-                      >
-                        {AREAS.map((a) => (
-                          <option key={a} value={a}>
-                            {a}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        value={p.equipo || ""}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            paradas: s.paradas.map((x) =>
-                              x.id === p.id ? { ...x, equipo: e.target.value } : x
-                            ),
-                          }))
-                        }
-                      />
-                    </td>
-                    <td>
-                      <select
-                        value={p.tipoParada}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            paradas: s.paradas.map((x) =>
-                              x.id === p.id ? { ...x, tipoParada: e.target.value } : x
-                            ),
-                          }))
-                        }
-                      >
-                        {TIPOS_PARADA.map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        value={p.motivo || ""}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            paradas: s.paradas.map((x) =>
-                              x.id === p.id ? { ...x, motivo: e.target.value } : x
-                            ),
-                          }))
-                        }
-                      />
-                    </td>
-                    <td>
-                      <select
-                        value={p.criticidad}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            paradas: s.paradas.map((x) =>
-                              x.id === p.id ? { ...x, criticidad: e.target.value } : x
-                            ),
-                          }))
-                        }
-                      >
-                        {CRITICIDAD.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <input
-                        type="number"
-                        min={0}
-                        value={p.downtimeMin ?? 0}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            paradas: s.paradas.map((x) =>
-                              x.id === p.id
-                                ? { ...x, downtimeMin: Number(e.target.value) }
-                                : x
-                            ),
-                          }))
-                        }
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="number"
-                        min={0}
-                        value={p.costoARS ?? 0}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            paradas: s.paradas.map((x) =>
-                              x.id === p.id
-                                ? { ...x, costoARS: Number(e.target.value) }
-                                : x
-                            ),
-                          }))
-                        }
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        value={p.codigoFalla || ""}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            paradas: s.paradas.map((x) =>
-                              x.id === p.id
-                                ? { ...x, codigoFalla: e.target.value }
-                                : x
-                            ),
-                          }))
-                        }
-                      />
-                    </td>
-                    <td>
-                      <button
-                        className="btn"
-                        onClick={() =>
-                          setState((s) => ({
-                            ...s,
-                            paradas: s.paradas.filter((x) => x.id !== p.id),
-                          }))
-                        }
-                      >
-                        Eliminar
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "#6b7280" }}>
-            Downtime total: {formatNumber(downtimeTotalMin)} min —{" "}
-            {formatNumber(downtimeHoras)} h.
-          </div>
-        </section>
-
-        {/* CUADRO 2: OTs Correctivas */}
+        {/* OTs CORRECTIVAS */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <div
             style={{
@@ -1377,7 +1303,7 @@ function App() {
           </div>
         </section>
 
-        {/* CUADRO 3: Preventivos */}
+        {/* PREVENTIVOS */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <div
             style={{
@@ -1573,7 +1499,7 @@ function App() {
           </div>
         </section>
 
-        {/* CUADRO 4: Producción (carga manual) */}
+        {/* PRODUCCIÓN — CARGA + IMPORT CSV */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <div
             style={{
@@ -1582,14 +1508,30 @@ function App() {
               alignItems: "center",
               marginBottom: "0.75rem",
               gap: "0.75rem",
+              flexWrap: "wrap",
             }}
           >
             <h2 style={{ fontSize: "0.95rem", fontWeight: 500 }}>
               Producción — Carga (base para OEE)
             </h2>
-            <button className="btn btn-primary" onClick={addProduccion}>
-              + Agregar turno
-            </button>
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <button className="btn btn-primary" onClick={addProduccion}>
+                + Agregar turno
+              </button>
+              <button
+                className="btn"
+                onClick={() => csvInputRef.current && csvInputRef.current.click()}
+              >
+                Importar producción CSV
+              </button>
+              <input
+                ref={csvInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                style={{ display: "none" }}
+                onChange={onImportProduccionCsv}
+              />
+            </div>
           </div>
           <div className="table-scroll">
             <table>
@@ -1610,244 +1552,381 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {produccionFiltrada.length === 0 && state.produccion.length === 0 && (
+                {state.produccion.length === 0 && (
                   <tr>
                     <td colSpan={12} style={{ padding: "0.75rem", color: "#6b7280" }}>
-                      Sin datos de producción aún. Cargá manualmente o conectamos luego el Excel.
+                      Sin datos de producción aún. Cargá manualmente o importá un CSV desde el
+                      sistema de planta.
                     </td>
                   </tr>
                 )}
-                {(state.produccion.length > 0 ? produccionFiltrada : state.produccion).map(
-                  (r) => (
-                    <tr key={r.id}>
-                      <td>
-                        <input
-                          type="date"
-                          value={r.fecha}
-                          onChange={(e) =>
-                            setState((s) => ({
-                              ...s,
-                              produccion: s.produccion.map((x) =>
-                                x.id === r.id ? { ...x, fecha: e.target.value } : x
-                              ),
-                            }))
-                          }
-                        />
-                      </td>
-                      <td>
-                        <select
-                          value={r.turno}
-                          onChange={(e) =>
-                            setState((s) => ({
-                              ...s,
-                              produccion: s.produccion.map((x) =>
-                                x.id === r.id ? { ...x, turno: e.target.value } : x
-                              ),
-                            }))
-                          }
-                        >
-                          {TURNOS.map((t) => (
-                            <option key={t} value={t}>
-                              {turnoLabel(t)}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          value={r.sector}
-                          onChange={(e) => {
-                            const nuevoSector = e.target.value;
-                            setState((s) => ({
-                              ...s,
-                              produccion: s.produccion.map((x) =>
-                                x.id === r.id
-                                  ? {
-                                      ...x,
-                                      sector: nuevoSector,
-                                      linea: LINEAS_POR_SECTOR[nuevoSector]?.includes(
-                                        x.linea
-                                      )
-                                        ? x.linea
-                                        : "",
-                                    }
-                                  : x
-                              ),
-                            }));
-                          }}
-                        >
-                          {SECTORES.map((sec) => (
-                            <option key={sec} value={sec}>
-                              {sec}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          value={r.linea}
-                          onChange={(e) =>
-                            setState((s) => ({
-                              ...s,
-                              produccion: s.produccion.map((x) =>
-                                x.id === r.id ? { ...x, linea: e.target.value } : x
-                              ),
-                            }))
-                          }
-                        >
-                          <option value="">-</option>
-                          {(LINEAS_POR_SECTOR[r.sector] || []).map((l) => (
-                            <option key={l} value={l}>
-                              {l}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min={0}
-                          value={r.kgPlan ?? 0}
-                          onChange={(e) =>
-                            setState((s) => ({
-                              ...s,
-                              produccion: s.produccion.map((x) =>
-                                x.id === r.id
-                                  ? { ...x, kgPlan: Number(e.target.value) }
-                                  : x
-                              ),
-                            }))
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min={0}
-                          value={r.kgProd ?? 0}
-                          onChange={(e) =>
-                            setState((s) => ({
-                              ...s,
-                              produccion: s.produccion.map((x) =>
-                                x.id === r.id
-                                  ? { ...x, kgProd: Number(e.target.value) }
-                                  : x
-                              ),
-                            }))
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min={0}
-                          value={r.cumpPlan ?? 0}
-                          onChange={(e) =>
-                            setState((s) => ({
-                              ...s,
-                              produccion: s.produccion.map((x) =>
-                                x.id === r.id
-                                  ? { ...x, cumpPlan: Number(e.target.value) }
-                                  : x
-                              ),
-                            }))
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min={0}
-                          value={r.kgReproceso ?? 0}
-                          onChange={(e) =>
-                            setState((s) => ({
-                              ...s,
-                              produccion: s.produccion.map((x) =>
-                                x.id === r.id
-                                  ? { ...x, kgReproceso: Number(e.target.value) }
-                                  : x
-                              ),
-                            }))
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min={0}
-                          value={r.kgDecomiso ?? 0}
-                          onChange={(e) =>
-                            setState((s) => ({
-                              ...s,
-                              produccion: s.produccion.map((x) =>
-                                x.id === r.id
-                                  ? { ...x, kgDecomiso: Number(e.target.value) }
-                                  : x
-                              ),
-                            }))
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min={0}
-                          value={r.tiempoParadaMin ?? 0}
-                          onChange={(e) =>
-                            setState((s) => ({
-                              ...s,
-                              produccion: s.produccion.map((x) =>
-                                x.id === r.id
-                                  ? { ...x, tiempoParadaMin: Number(e.target.value) }
-                                  : x
-                              ),
-                            }))
-                          }
-                        />
-                      </td>
-                      <td>
-                        <select
-                          value={r.supervisor}
-                          onChange={(e) =>
-                            setState((s) => ({
-                              ...s,
-                              produccion: s.produccion.map((x) =>
-                                x.id === r.id
-                                  ? { ...x, supervisor: e.target.value }
-                                  : x
-                              ),
-                            }))
-                          }
-                        >
-                          {SUPERVISORES.map((s) => (
-                            <option key={s} value={s}>
-                              {s}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <button
-                          className="btn"
-                          onClick={() =>
-                            setState((s) => ({
-                              ...s,
-                              produccion: s.produccion.filter((x) => x.id !== r.id),
-                            }))
-                          }
-                        >
-                          Eliminar
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                )}
+                {state.produccion.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <input
+                        type="date"
+                        value={r.fecha}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, fecha: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={r.turno}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, turno: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      >
+                        {TURNOS.map((t) => (
+                          <option key={t} value={t}>
+                            {turnoLabel(t)}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        value={r.sector}
+                        onChange={(e) => {
+                          const nuevoSector = e.target.value;
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id
+                                ? {
+                                    ...x,
+                                    sector: nuevoSector,
+                                    linea: LINEAS_POR_SECTOR[nuevoSector]?.includes(
+                                      x.linea
+                                    )
+                                      ? x.linea
+                                      : "",
+                                  }
+                                : x
+                            ),
+                          }));
+                        }}
+                      >
+                        {SECTORES.map((sec) => (
+                          <option key={sec} value={sec}>
+                            {sec}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        value={r.linea}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, linea: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      >
+                        <option value="">-</option>
+                        {(LINEAS_POR_SECTOR[r.sector] || []).map((l) => (
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.kgPlan ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id
+                                ? { ...x, kgPlan: Number(e.target.value) }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.kgProd ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id
+                                ? { ...x, kgProd: Number(e.target.value) }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.cumpPlan ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id
+                                ? { ...x, cumpPlan: Number(e.target.value) }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.kgReproceso ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id
+                                ? { ...x, kgReproceso: Number(e.target.value) }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.kgDecomiso ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id
+                                ? { ...x, kgDecomiso: Number(e.target.value) }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.tiempoParadaMin ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id
+                                ? { ...x, tiempoParadaMin: Number(e.target.value) }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={r.supervisor}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id
+                                ? { ...x, supervisor: e.target.value }
+                                : x
+                            ),
+                          }))
+                        }
+                      >
+                        {SUPERVISORES.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.filter((x) => x.id !== r.id),
+                          }))
+                        }
+                      >
+                        Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         </section>
 
-        {/* Notas */}
+        {/* DATOS ECONÓMICOS */}
+        <section className="card" style={{ marginBottom: "1.5rem" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "0.75rem",
+              gap: "0.75rem",
+            }}
+          >
+            <h2 style={{ fontSize: "0.95rem", fontWeight: 500 }}>
+              Datos Económicos Mensuales (USD)
+            </h2>
+            <button className="btn btn-primary" onClick={addEconomia}>
+              + Agregar registro
+            </button>
+          </div>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Periodo (mes)</th>
+                  <th>Sector</th>
+                  <th>Gasto mant. USD</th>
+                  <th>Costo energía USD</th>
+                  <th>Ton producidas sector</th>
+                  <th>Mant. USD/ton</th>
+                  <th>Energía USD/ton</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {economiaCalculada.length === 0 && (
+                  <tr>
+                    <td colSpan={8} style={{ padding: "0.75rem", color: "#6b7280" }}>
+                      Sin registros económicos aún. Cargá un registro por mes y sector.
+                    </td>
+                  </tr>
+                )}
+                {economiaCalculada.map((e) => (
+                  <tr key={e.id}>
+                    <td>
+                      <input
+                        type="month"
+                        value={e.periodo}
+                        onChange={(ev) =>
+                          setState((s) => ({
+                            ...s,
+                            economia: s.economia.map((x) =>
+                              x.id === e.id ? { ...x, periodo: ev.target.value } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={e.sector}
+                        onChange={(ev) =>
+                          setState((s) => ({
+                            ...s,
+                            economia: s.economia.map((x) =>
+                              x.id === e.id ? { ...x, sector: ev.target.value } : x
+                            ),
+                          }))
+                        }
+                      >
+                        {SECTORES.map((sec) => (
+                          <option key={sec} value={sec}>
+                            {sec}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={e.gastoMantenimientoUSD ?? 0}
+                        onChange={(ev) =>
+                          setState((s) => ({
+                            ...s,
+                            economia: s.economia.map((x) =>
+                              x.id === e.id
+                                ? {
+                                    ...x,
+                                    gastoMantenimientoUSD: Number(ev.target.value),
+                                  }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={e.costoEnergiaUSD ?? 0}
+                        onChange={(ev) =>
+                          setState((s) => ({
+                            ...s,
+                            economia: s.economia.map((x) =>
+                              x.id === e.id
+                                ? {
+                                    ...x,
+                                    costoEnergiaUSD: Number(ev.target.value),
+                                  }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>{formatNumber(e.toneladasSector, 3)}</td>
+                    <td>{formatNumber(e.mantPorTon, 2)}</td>
+                    <td>{formatNumber(e.enerPorTon, 2)}</td>
+                    <td>
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          setState((s) => ({
+                            ...s,
+                            economia: s.economia.filter((x) => x.id !== e.id),
+                          }))
+                        }
+                      >
+                        Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* NOTAS */}
         <section className="card" style={{ marginBottom: "2rem" }}>
           <h2
             style={{
@@ -1875,7 +1954,7 @@ function App() {
             paddingBottom: "1.5rem",
           }}
         >
-          Tablero local (localStorage). Próximo paso: Firestore/Firebase para multiusuario.
+          Tablero local (localStorage). Siguiente etapa: Firestore/Firebase para multiusuario.
         </footer>
       </div>
     </div>
