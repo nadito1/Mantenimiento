@@ -1,5 +1,9 @@
 const { useState, useEffect, useMemo, useRef } = React;
 
+// ================== CONSTANTES / CATÁLOGOS ==================
+
+const MINUTOS_TURNO = 390;
+
 // Utilidades
 const formatNumber = (n, digits = 2) =>
   isFinite(n) ? n.toLocaleString("es-AR", { maximumFractionDigits: digits }) : "-";
@@ -13,8 +17,6 @@ const download = (filename, data) => {
   a.click();
   URL.revokeObjectURL(url);
 };
-
-// ==== BASE GEORGALOS ====
 
 // Supervisores
 const SUPERVISORES = ["ALLOI", "AVILA", "BOERIS"];
@@ -73,10 +75,11 @@ const toDate = (s) => new Date(s);
 const inRange = (d, desde, hasta) =>
   d >= new Date(desde + "T00:00") && d <= new Date(hasta + "T23:59:59");
 
-// Componente principal
+// ================== COMPONENTE PRINCIPAL ==================
+
 function App() {
   const [state, setState] = useState(() => {
-    const saved = localStorage.getItem("kpi-mantenimiento-georgalos-v2");
+    const saved = localStorage.getItem("kpi-mantenimiento-georgalos-v3");
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -95,22 +98,24 @@ function App() {
       periodoDesde: primerDiaMes,
       periodoHasta: ultimoDiaMes,
       horasPlanificadas: 720,
-      ventasARS: 0,
-      costoMantenimientoARS: 0,
       capacidadHHsemana: 160,
       filtroLinea: "Todas",
       filtroTurno: "Todos",
+      filtroSector: "Todos",
+      filtroSupervisor: "Todos",
       paradas: [],
       ots: [],
+      produccion: [], // NUEVO: datos de producción
     };
   });
 
   // Persistencia
   useEffect(() => {
-    localStorage.setItem("kpi-mantenimiento-georgalos-v2", JSON.stringify(state));
+    localStorage.setItem("kpi-mantenimiento-georgalos-v3", JSON.stringify(state));
   }, [state]);
 
-  // Filtros por período
+  // ========== FILTROS POR PERÍODO ==========
+
   const paradasPeriodo = useMemo(
     () =>
       state.paradas.filter((p) =>
@@ -127,7 +132,16 @@ function App() {
     [state.ots, state.periodoDesde, state.periodoHasta]
   );
 
-  // Filtros por línea/turno
+  const produccionPeriodo = useMemo(
+    () =>
+      state.produccion.filter((r) =>
+        inRange(new Date(r.fecha + "T00:00"), state.periodoDesde, state.periodoHasta)
+      ),
+    [state.produccion, state.periodoDesde, state.periodoHasta]
+  );
+
+  // ========== FILTROS POR LÍNEA / TURNO / SECTOR / SUPERVISOR ==========
+
   const paradasFiltradas = useMemo(
     () =>
       paradasPeriodo.filter(
@@ -148,6 +162,27 @@ function App() {
     [otsPeriodo, state.filtroLinea, state.filtroTurno]
   );
 
+  const produccionFiltrada = useMemo(
+    () =>
+      produccionPeriodo.filter((r) => {
+        const okSector =
+          state.filtroSector === "Todos" || r.sector === state.filtroSector;
+        const okLinea = state.filtroLinea === "Todas" || r.linea === state.filtroLinea;
+        const okTurno =
+          state.filtroTurno === "Todos" || r.turno === state.filtroTurno;
+        const okSup =
+          state.filtroSupervisor === "Todos" || r.supervisor === state.filtroSupervisor;
+        return okSector && okLinea && okTurno && okSup;
+      }),
+    [
+      produccionPeriodo,
+      state.filtroSector,
+      state.filtroLinea,
+      state.filtroTurno,
+      state.filtroSupervisor,
+    ]
+  );
+
   // Subconjuntos por tipo
   const otsCorrFiltradas = useMemo(
     () => otsFiltradas.filter((o) => o.tipo === "Correctivo"),
@@ -158,7 +193,8 @@ function App() {
     [otsFiltradas]
   );
 
-  // KPIs
+  // ========== KPIs MANTENIMIENTO (paradas + OTs) ==========
+
   const downtimeTotalMin = useMemo(
     () => paradasFiltradas.reduce((acc, p) => acc + (Number(p.downtimeMin) || 0), 0),
     [paradasFiltradas]
@@ -193,13 +229,106 @@ function App() {
   const pctPrev = (otsPrev / otsTot) * 100;
   const pctCorr = (otsCorr / otsTot) * 100;
 
-  const ratioCostoVentas = useMemo(() => {
-    const v = Number(state.ventasARS) || 0;
-    const c = Number(state.costoMantenimientoARS) || 0;
-    return v > 0 ? c / v : 0;
-  }, [state.ventasARS, state.costoMantenimientoARS]);
+  // ========== KPIs PRODUCCIÓN (producciónFiltrada) ==========
 
-  // Patrones Flynn
+  const totalKgPlan = produccionFiltrada.reduce(
+    (acc, r) => acc + (Number(r.kgPlan) || 0),
+    0
+  );
+  const totalKgProd = produccionFiltrada.reduce(
+    (acc, r) => acc + (Number(r.kgProd) || 0),
+    0
+  );
+  const totalKgReproceso = produccionFiltrada.reduce(
+    (acc, r) => acc + (Number(r.kgReproceso) || 0),
+    0
+  );
+  const totalKgDecomiso = produccionFiltrada.reduce(
+    (acc, r) => acc + (Number(r.kgDecomiso) || 0),
+    0
+  );
+  const totalTurnos = produccionFiltrada.length;
+
+  const downtimeProdMin = produccionFiltrada.reduce(
+    (acc, r) => acc + (Number(r.tiempoParadaMin) || 0),
+    0
+  );
+  const tiempoPlanTotalMin = totalTurnos * MINUTOS_TURNO;
+  const uptimeProdMin = Math.max(0, tiempoPlanTotalMin - downtimeProdMin);
+
+  const fallasProd = produccionFiltrada.filter(
+    (r) => (Number(r.tiempoParadaMin) || 0) > 0
+  ).length;
+
+  const MTTR_prod_h =
+    fallasProd > 0 ? (downtimeProdMin / 60) / fallasProd : 0;
+  const MTBF_prod_h =
+    fallasProd > 0 ? (uptimeProdMin / 60) / fallasProd : 0;
+
+  const dispProd =
+    tiempoPlanTotalMin > 0 ? uptimeProdMin / tiempoPlanTotalMin : 0;
+
+  const perfProd = totalKgPlan > 0 ? totalKgProd / totalKgPlan : 0;
+  const calidadProd =
+    totalKgProd > 0
+      ? (totalKgProd - totalKgReproceso - totalKgDecomiso) / totalKgProd
+      : 0;
+
+  const OEE_prod = dispProd * perfProd * calidadProd;
+
+  const horasTrabajadasProd = uptimeProdMin / 60;
+
+  // KPIs por supervisor (sobre produccionPeriodo + filtros sector/línea/turno)
+  const kpisSupervisores = SUPERVISORES.map((sup) => {
+    const filas = produccionPeriodo.filter((r) => {
+      const okSup = r.supervisor === sup;
+      const okSector =
+        state.filtroSector === "Todos" || r.sector === state.filtroSector;
+      const okLinea =
+        state.filtroLinea === "Todas" || r.linea === state.filtroLinea;
+      const okTurno =
+        state.filtroTurno === "Todos" || r.turno === state.filtroTurno;
+      return okSup && okSector && okLinea && okTurno;
+    });
+
+    if (filas.length === 0) {
+      return {
+        supervisor: sup,
+        eficiencia: 0,
+        oee: 0,
+      };
+    }
+
+    const kgPlan = filas.reduce((a, r) => a + (Number(r.kgPlan) || 0), 0);
+    const kgProd = filas.reduce((a, r) => a + (Number(r.kgProd) || 0), 0);
+    const kgRep = filas.reduce((a, r) => a + (Number(r.kgReproceso) || 0), 0);
+    const kgDec = filas.reduce((a, r) => a + (Number(r.kgDecomiso) || 0), 0);
+
+    const turnos = filas.length;
+    const tPlan = turnos * MINUTOS_TURNO;
+    const dParo = filas.reduce(
+      (a, r) => a + (Number(r.tiempoParadaMin) || 0),
+      0
+    );
+    const tUp = Math.max(0, tPlan - dParo);
+
+    const disp = tPlan > 0 ? tUp / tPlan : 0;
+    const perf = kgPlan > 0 ? kgProd / kgPlan : 0;
+    const cal =
+      kgProd > 0 ? (kgProd - kgRep - kgDec) / kgProd : 0;
+
+    const oee = disp * perf * cal;
+    const eficiencia = kgPlan > 0 ? (kgProd / kgPlan) * 100 : 0;
+
+    return {
+      supervisor: sup,
+      eficiencia,
+      oee: oee * 100,
+    };
+  });
+
+  // ========== PATRONES FLYNN (mantenimiento) ==========
+
   const patrones = [
     {
       id: "falta_insumos",
@@ -236,7 +365,8 @@ function App() {
       .reduce((a, p) => a + (p.downtimeMin || 0), 0),
   }));
 
-  // Manejo formularios
+  // ========== MANEJO FORMULARIOS ==========
+
   const addParada = () => {
     setState((s) => ({
       ...s,
@@ -313,6 +443,29 @@ function App() {
     }));
   };
 
+  const addProduccion = () => {
+    setState((s) => ({
+      ...s,
+      produccion: [
+        ...s.produccion,
+        {
+          id: crypto.randomUUID(),
+          fecha: new Date().toISOString().slice(0, 10),
+          turno: "Mañana",
+          sector: "CHOCOLATE",
+          linea: "CV1000-1",
+          kgPlan: 0,
+          kgProd: 0,
+          kgReproceso: 0,
+          kgDecomiso: 0,
+          cumpPlan: 0,
+          tiempoParadaMin: 0,
+          supervisor: "ALLOI",
+        },
+      ],
+    }));
+  };
+
   const fileInputRef = useRef(null);
 
   const onImport = (e) => {
@@ -333,7 +486,7 @@ function App() {
 
   const resetData = () => {
     if (!confirm("¿Vaciar todos los datos del dashboard?")) return;
-    localStorage.removeItem("kpi-mantenimiento-georgalos-v2");
+    localStorage.removeItem("kpi-mantenimiento-georgalos-v3");
     location.reload();
   };
 
@@ -342,6 +495,8 @@ function App() {
   useEffect(() => {
     localStorage.setItem("kpi-notas", notas);
   }, [notas]);
+
+  // ========== RENDER ==========
 
   return (
     <div className="app-root">
@@ -360,7 +515,8 @@ function App() {
               KPIs de Mantenimiento — Georgalos
             </h1>
             <p style={{ fontSize: "0.8rem", color: "#6b7280" }}>
-              MTBF, MTTR, Disponibilidad, % Preventivo/Correctivo, Cumplimiento, Backlog, Costo/Ventas
+              MTBF, MTTR, Disponibilidad, % Preventivo/Correctivo, Cumplimiento, Backlog +
+              Producción y OEE por sector / supervisor
             </p>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
@@ -427,7 +583,7 @@ function App() {
               </div>
               <div style={{ gridColumn: "1 / -1" }}>
                 <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>
-                  Horas planificadas
+                  Horas planificadas (mant.)
                 </div>
                 <input
                   type="number"
@@ -454,6 +610,22 @@ function App() {
                 fontSize: "0.75rem",
               }}
             >
+              <div>
+                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Sector</div>
+                <select
+                  value={state.filtroSector}
+                  onChange={(e) =>
+                    setState((s) => ({ ...s, filtroSector: e.target.value }))
+                  }
+                >
+                  <option value="Todos">Todos</option>
+                  {SECTORES.map((sec) => (
+                    <option key={sec} value={sec}>
+                      {sec}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Línea</div>
                 <select
@@ -486,57 +658,23 @@ function App() {
                   ))}
                 </select>
               </div>
-            </div>
-          </div>
-
-          <div className="card">
-            <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>Economía</h2>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "0.5rem",
-                fontSize: "0.75rem",
-              }}
-            >
-              <div>
-                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Ventas ARS</div>
-                <input
-                  type="number"
-                  min={0}
-                  value={state.ventasARS}
-                  onChange={(e) =>
-                    setState((s) => ({ ...s, ventasARS: Number(e.target.value) }))
-                  }
-                />
-              </div>
               <div>
                 <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>
-                  Costo mant. ARS
+                  Supervisor (prod.)
                 </div>
-                <input
-                  type="number"
-                  min={0}
-                  value={state.costoMantenimientoARS}
+                <select
+                  value={state.filtroSupervisor}
                   onChange={(e) =>
-                    setState((s) => ({
-                      ...s,
-                      costoMantenimientoARS: Number(e.target.value),
-                    }))
+                    setState((s) => ({ ...s, filtroSupervisor: e.target.value }))
                   }
-                />
-              </div>
-              <div
-                style={{
-                  gridColumn: "1 / -1",
-                  fontSize: "0.8rem",
-                  color: "#4b5563",
-                }}
-              >
-                Ratio Costo/Ventas:{" "}
-                <span style={{ fontWeight: 600 }}>
-                  {formatNumber(ratioCostoVentas, 3)}
-                </span>
+                >
+                  <option value="Todos">Todos</option>
+                  {SUPERVISORES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>
@@ -572,16 +710,16 @@ function App() {
           </div>
         </section>
 
-        {/* KPIs */}
+        {/* KPIs MANTENIMIENTO */}
         <section className="kpi-grid" style={{ marginBottom: "1rem" }}>
-          <KpiCard title="MTBF" value={`${formatNumber(MTBF_h)} h`} hint={`${fallas} fallas`} />
+          <KpiCard title="MTBF (mant.)" value={`${formatNumber(MTBF_h)} h`} hint={`${fallas} fallas`} />
           <KpiCard
-            title="MTTR"
+            title="MTTR (mant.)"
             value={`${formatNumber(MTTR_h)} h`}
             hint={`${formatNumber(downtimeHoras)} h paro`}
           />
           <KpiCard
-            title="Disponibilidad"
+            title="Disponibilidad (mant.)"
             value={`${formatNumber(disponibilidad * 100)} %`}
             hint={`${formatNumber(uptimeHoras)} h uptime`}
           />
@@ -600,6 +738,77 @@ function App() {
             value={`${formatNumber(pctCorr)} %`}
             hint={`${otsCorr}/${otsFiltradas.length} OTs`}
           />
+        </section>
+
+        {/* KPIs PRODUCCIÓN */}
+        <section className="kpi-grid" style={{ marginBottom: "1rem" }}>
+          <KpiCard
+            title="MTBF (prod.)"
+            value={`${formatNumber(MTBF_prod_h)} h`}
+            hint={`${fallasProd} fallas (prod.)`}
+          />
+          <KpiCard
+            title="MTTR (prod.)"
+            value={`${formatNumber(MTTR_prod_h)} h`}
+            hint={`${formatNumber(downtimeProdMin / 60)} h paro`}
+          />
+          <KpiCard
+            title="Disponibilidad (prod.)"
+            value={`${formatNumber(dispProd * 100)} %`}
+            hint={`${formatNumber(horasTrabajadasProd)} h trabajadas`}
+          />
+          <KpiCard
+            title="Eficiencia (kg prod / plan)"
+            value={`${formatNumber(perfProd * 100)} %`}
+            hint={`${formatNumber(totalKgProd)} / ${formatNumber(totalKgPlan)} kg`}
+          />
+          <KpiCard
+            title="OEE (prod.)"
+            value={`${formatNumber(OEE_prod * 100)} %`}
+            hint={`Disp·Perf·Calidad`}
+          />
+          <KpiCard
+            title="Calidad (kg buenos)"
+            value={
+              totalKgProd > 0
+                ? `${formatNumber(
+                    ((totalKgProd - totalKgReproceso - totalKgDecomiso) /
+                      totalKgProd) *
+                      100
+                  )} %`
+                : "- %"
+            }
+            hint={`Reproc: ${formatNumber(
+              totalKgReproceso
+            )} kg · Decom: ${formatNumber(totalKgDecomiso)} kg`}
+          />
+        </section>
+
+        {/* KPIs POR SUPERVISOR */}
+        <section className="card" style={{ marginBottom: "1.5rem" }}>
+          <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>
+            KPIs por Supervisor (producción)
+          </h2>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Supervisor</th>
+                  <th>Eficiencia (%)</th>
+                  <th>OEE (%)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {kpisSupervisores.map((k) => (
+                  <tr key={k.supervisor}>
+                    <td>{k.supervisor}</td>
+                    <td>{formatNumber(k.eficiencia)}</td>
+                    <td>{formatNumber(k.oee)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
 
         {/* Patrones */}
@@ -1364,6 +1573,280 @@ function App() {
           </div>
         </section>
 
+        {/* CUADRO 4: Producción (carga manual) */}
+        <section className="card" style={{ marginBottom: "1.5rem" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "0.75rem",
+              gap: "0.75rem",
+            }}
+          >
+            <h2 style={{ fontSize: "0.95rem", fontWeight: 500 }}>
+              Producción — Carga (base para OEE)
+            </h2>
+            <button className="btn btn-primary" onClick={addProduccion}>
+              + Agregar turno
+            </button>
+          </div>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Turno</th>
+                  <th>Sector</th>
+                  <th>Línea</th>
+                  <th>Kg plan</th>
+                  <th>Kg producidos</th>
+                  <th>% cump plan</th>
+                  <th>Kg reproceso</th>
+                  <th>Kg decomiso</th>
+                  <th>Tiempo parada averías (min)</th>
+                  <th>Supervisor</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {produccionFiltrada.length === 0 && state.produccion.length === 0 && (
+                  <tr>
+                    <td colSpan={12} style={{ padding: "0.75rem", color: "#6b7280" }}>
+                      Sin datos de producción aún. Cargá manualmente o conectamos luego el Excel.
+                    </td>
+                  </tr>
+                )}
+                {(state.produccion.length > 0 ? produccionFiltrada : state.produccion).map(
+                  (r) => (
+                    <tr key={r.id}>
+                      <td>
+                        <input
+                          type="date"
+                          value={r.fecha}
+                          onChange={(e) =>
+                            setState((s) => ({
+                              ...s,
+                              produccion: s.produccion.map((x) =>
+                                x.id === r.id ? { ...x, fecha: e.target.value } : x
+                              ),
+                            }))
+                          }
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={r.turno}
+                          onChange={(e) =>
+                            setState((s) => ({
+                              ...s,
+                              produccion: s.produccion.map((x) =>
+                                x.id === r.id ? { ...x, turno: e.target.value } : x
+                              ),
+                            }))
+                          }
+                        >
+                          {TURNOS.map((t) => (
+                            <option key={t} value={t}>
+                              {turnoLabel(t)}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={r.sector}
+                          onChange={(e) => {
+                            const nuevoSector = e.target.value;
+                            setState((s) => ({
+                              ...s,
+                              produccion: s.produccion.map((x) =>
+                                x.id === r.id
+                                  ? {
+                                      ...x,
+                                      sector: nuevoSector,
+                                      linea: LINEAS_POR_SECTOR[nuevoSector]?.includes(
+                                        x.linea
+                                      )
+                                        ? x.linea
+                                        : "",
+                                    }
+                                  : x
+                              ),
+                            }));
+                          }}
+                        >
+                          {SECTORES.map((sec) => (
+                            <option key={sec} value={sec}>
+                              {sec}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={r.linea}
+                          onChange={(e) =>
+                            setState((s) => ({
+                              ...s,
+                              produccion: s.produccion.map((x) =>
+                                x.id === r.id ? { ...x, linea: e.target.value } : x
+                              ),
+                            }))
+                          }
+                        >
+                          <option value="">-</option>
+                          {(LINEAS_POR_SECTOR[r.sector] || []).map((l) => (
+                            <option key={l} value={l}>
+                              {l}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          value={r.kgPlan ?? 0}
+                          onChange={(e) =>
+                            setState((s) => ({
+                              ...s,
+                              produccion: s.produccion.map((x) =>
+                                x.id === r.id
+                                  ? { ...x, kgPlan: Number(e.target.value) }
+                                  : x
+                              ),
+                            }))
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          value={r.kgProd ?? 0}
+                          onChange={(e) =>
+                            setState((s) => ({
+                              ...s,
+                              produccion: s.produccion.map((x) =>
+                                x.id === r.id
+                                  ? { ...x, kgProd: Number(e.target.value) }
+                                  : x
+                              ),
+                            }))
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          value={r.cumpPlan ?? 0}
+                          onChange={(e) =>
+                            setState((s) => ({
+                              ...s,
+                              produccion: s.produccion.map((x) =>
+                                x.id === r.id
+                                  ? { ...x, cumpPlan: Number(e.target.value) }
+                                  : x
+                              ),
+                            }))
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          value={r.kgReproceso ?? 0}
+                          onChange={(e) =>
+                            setState((s) => ({
+                              ...s,
+                              produccion: s.produccion.map((x) =>
+                                x.id === r.id
+                                  ? { ...x, kgReproceso: Number(e.target.value) }
+                                  : x
+                              ),
+                            }))
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          value={r.kgDecomiso ?? 0}
+                          onChange={(e) =>
+                            setState((s) => ({
+                              ...s,
+                              produccion: s.produccion.map((x) =>
+                                x.id === r.id
+                                  ? { ...x, kgDecomiso: Number(e.target.value) }
+                                  : x
+                              ),
+                            }))
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          value={r.tiempoParadaMin ?? 0}
+                          onChange={(e) =>
+                            setState((s) => ({
+                              ...s,
+                              produccion: s.produccion.map((x) =>
+                                x.id === r.id
+                                  ? { ...x, tiempoParadaMin: Number(e.target.value) }
+                                  : x
+                              ),
+                            }))
+                          }
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={r.supervisor}
+                          onChange={(e) =>
+                            setState((s) => ({
+                              ...s,
+                              produccion: s.produccion.map((x) =>
+                                x.id === r.id
+                                  ? { ...x, supervisor: e.target.value }
+                                  : x
+                              ),
+                            }))
+                          }
+                        >
+                          {SUPERVISORES.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <button
+                          className="btn"
+                          onClick={() =>
+                            setState((s) => ({
+                              ...s,
+                              produccion: s.produccion.filter((x) => x.id !== r.id),
+                            }))
+                          }
+                        >
+                          Eliminar
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         {/* Notas */}
         <section className="card" style={{ marginBottom: "2rem" }}>
           <h2
@@ -1392,7 +1875,7 @@ function App() {
             paddingBottom: "1.5rem",
           }}
         >
-          Tablero local (localStorage). Próximo paso: Firestore + usuarios de planta.
+          Tablero local (localStorage). Próximo paso: Firestore/Firebase para multiusuario.
         </footer>
       </div>
     </div>
