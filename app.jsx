@@ -14,10 +14,57 @@ const download = (filename, data) => {
   URL.revokeObjectURL(url);
 };
 
-// Catálogos Georgalos (ejemplo)
-const LINEAS = ["Flynn", "CV-1000", "Delver", "Tabletas", "Bombones", "Servicios (Caldera/Frío)"];
-const TURNOS = ["A", "B", "C"];
-const AREAS = ["Estuchadora", "Balanza", "Mesas de refrigeración", "Cocción", "Empaque", "Servicios"];
+// ==== BASE GEORGALOS ====
+
+// Supervisores
+const SUPERVISORES = ["ALLOI", "AVILA", "BOERIS"];
+
+// Turnos (guardamos nombre completo, mostramos inicial)
+const TURNOS = ["Mañana", "Tarde", "Noche"];
+const turnoLabel = (t) => (t ? t[0] : "");
+
+// Sectores
+const SECTORES = [
+  "CHOCOLATE",
+  "ALFAJOR",
+  "HUEVO DE PASCUA",
+  "BARRA DE MANI",
+  "TURRON",
+  "BARRA DE CEREALES",
+  "CARAMELO BLANDO",
+  "CARAMELO DURO",
+  "ARTESANAL",
+  "CUBANITO",
+  "CONFITE",
+];
+
+// Líneas por sector
+const LINEAS_POR_SECTOR = {
+  CHOCOLATE: ["CV1000-1", "CV1000-2", "CV1000-3", "DELVER", "CHISPAS", "MANGA"],
+  TURRON: ["NAMUR", "TURRON FIESTA", "CROCANTE", "ESTUCHADO", "TURRON ARTESANAL"],
+  "CARAMELO BLANDO": ["FLYNN", "FLYNNIES", "XXL", "EMZO", "ENVAMEC"],
+  "CARAMELO DURO": ["EMZO", "ENVAMEC"],
+  CONFITE: ["PACK PLUS", "ESTUCHADORA", "CONFITE"],
+  ALFAJOR: ["ALFAJOR"],
+  "HUEVO DE PASCUA": ["HUEVO DE PASCUA"],
+  "BARRA DE MANI": ["BARRA DE MANI", "LINGOTE"],
+  "BARRA DE CEREALES": ["BARRA DE CEREALES"],
+  CUBANITO: ["CUBANITO"],
+  ARTESANAL: [],
+};
+
+// Helper: todas las líneas
+const LINEAS = Array.from(new Set(Object.values(LINEAS_POR_SECTOR).flat()));
+
+// Áreas internas (por ahora igual que antes)
+const AREAS = [
+  "Estuchadora",
+  "Balanza",
+  "Mesas de refrigeración",
+  "Cocción",
+  "Empaque",
+  "Servicios",
+];
 const TIPOS_PARADA = ["No planificada", "Planificada", "Falta de insumos"];
 const CRITICIDAD = ["A", "B", "C"];
 
@@ -66,7 +113,9 @@ function App() {
   // Filtros por período
   const paradasPeriodo = useMemo(
     () =>
-      state.paradas.filter((p) => inRange(toDate(p.fecha), state.periodoDesde, state.periodoHasta)),
+      state.paradas.filter((p) =>
+        inRange(toDate(p.fecha), state.periodoDesde, state.periodoHasta)
+      ),
     [state.paradas, state.periodoDesde, state.periodoHasta]
   );
 
@@ -196,8 +245,8 @@ function App() {
         {
           id: crypto.randomUUID(),
           fecha: new Date().toISOString().slice(0, 16),
-          linea: "Flynn",
-          turno: "A",
+          linea: "FLYNN",
+          turno: "Mañana",
           area: "Empaque",
           equipo: "",
           motivo: "",
@@ -221,8 +270,8 @@ function App() {
         {
           id: crypto.randomUUID(),
           fecha: new Date().toISOString().slice(0, 10),
-          linea: "Flynn",
-          turno: "A",
+          linea: "FLYNN",
+          turno: "Mañana",
           equipo: "",
           tipo: "Correctivo",
           estado: "En curso",
@@ -247,8 +296,8 @@ function App() {
           id: crypto.randomUUID(),
           fecha: new Date().toISOString().slice(0, 10),
           fechaEjec: "",
-          linea: "Flynn",
-          turno: "A",
+          linea: "FLYNN",
+          turno: "Mañana",
           equipo: "",
           tipo: "Preventivo",
           estado: "Planificada",
@@ -432,7 +481,7 @@ function App() {
                   <option value="Todos">Todos</option>
                   {TURNOS.map((t) => (
                     <option key={t} value={t}>
-                      {t}
+                      {turnoLabel(t)}
                     </option>
                   ))}
                 </select>
@@ -477,7 +526,13 @@ function App() {
                   }
                 />
               </div>
-              <div style={{ gridColumn: "1 / -1", fontSize: "0.8rem", color: "#4b5563" }}>
+              <div
+                style={{
+                  gridColumn: "1 / -1",
+                  fontSize: "0.8rem",
+                  color: "#4b5563",
+                }}
+              >
                 Ratio Costo/Ventas:{" "}
                 <span style={{ fontWeight: 600 }}>
                   {formatNumber(ratioCostoVentas, 3)}
@@ -571,7 +626,12 @@ function App() {
               >
                 <div style={{ color: "#6b7280" }}>{r.label}</div>
                 <div
-                  style={{ fontSize: "1.1rem", fontWeight: 600, lineHeight: 1, marginTop: 4 }}
+                  style={{
+                    fontSize: "1.1rem",
+                    fontWeight: 600,
+                    lineHeight: 1,
+                    marginTop: 4,
+                  }}
                 >
                   {r.conteo} eventos
                 </div>
@@ -654,7 +714,9 @@ function App() {
                         }
                       >
                         {LINEAS.map((l) => (
-                          <option key={l}>{l}</option>
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
                         ))}
                       </select>
                     </td>
@@ -671,7 +733,9 @@ function App() {
                         }
                       >
                         {TURNOS.map((t) => (
-                          <option key={t}>{t}</option>
+                          <option key={t} value={t}>
+                            {turnoLabel(t)}
+                          </option>
                         ))}
                       </select>
                     </td>
@@ -688,14 +752,16 @@ function App() {
                         }
                       >
                         {AREAS.map((a) => (
-                          <option key={a}>{a}</option>
+                          <option key={a} value={a}>
+                            {a}
+                          </option>
                         ))}
                       </select>
                     </td>
                     <td>
                       <input
                         type="text"
-                        value={p.equipo}
+                        value={p.equipo || ""}
                         onChange={(e) =>
                           setState((s) => ({
                             ...s,
@@ -719,14 +785,16 @@ function App() {
                         }
                       >
                         {TIPOS_PARADA.map((t) => (
-                          <option key={t}>{t}</option>
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
                         ))}
                       </select>
                     </td>
                     <td>
                       <input
                         type="text"
-                        value={p.motivo}
+                        value={p.motivo || ""}
                         onChange={(e) =>
                           setState((s) => ({
                             ...s,
@@ -750,7 +818,9 @@ function App() {
                         }
                       >
                         {CRITICIDAD.map((c) => (
-                          <option key={c}>{c}</option>
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
                         ))}
                       </select>
                     </td>
@@ -758,7 +828,7 @@ function App() {
                       <input
                         type="number"
                         min={0}
-                        value={p.downtimeMin}
+                        value={p.downtimeMin ?? 0}
                         onChange={(e) =>
                           setState((s) => ({
                             ...s,
@@ -902,7 +972,9 @@ function App() {
                         }
                       >
                         {LINEAS.map((l) => (
-                          <option key={l}>{l}</option>
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
                         ))}
                       </select>
                     </td>
@@ -919,14 +991,16 @@ function App() {
                         }
                       >
                         {TURNOS.map((t) => (
-                          <option key={t}>{t}</option>
+                          <option key={t} value={t}>
+                            {turnoLabel(t)}
+                          </option>
                         ))}
                       </select>
                     </td>
                     <td>
                       <input
                         type="text"
-                        value={o.equipo}
+                        value={o.equipo || ""}
                         onChange={(e) =>
                           setState((s) => ({
                             ...s,
@@ -968,7 +1042,9 @@ function App() {
                         }
                       >
                         {CRITICIDAD.map((c) => (
-                          <option key={c}>{c}</option>
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
                         ))}
                       </select>
                     </td>
@@ -1175,14 +1251,16 @@ function App() {
                         }
                       >
                         {LINEAS.map((l) => (
-                          <option key={l}>{l}</option>
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
                         ))}
                       </select>
                     </td>
                     <td>
                       <input
                         type="text"
-                        value={o.equipo}
+                        value={o.equipo || ""}
                         onChange={(e) =>
                           setState((s) => ({
                             ...s,
@@ -1260,7 +1338,13 @@ function App() {
               </tbody>
             </table>
           </div>
-          <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#374151" }}>
+          <div
+            style={{
+              marginTop: "0.5rem",
+              fontSize: "0.8rem",
+              color: "#374151",
+            }}
+          >
             <span className="badge">
               Planificados: {otsPrevFiltradas.length}
             </span>{" "}
@@ -1282,7 +1366,13 @@ function App() {
 
         {/* Notas */}
         <section className="card" style={{ marginBottom: "2rem" }}>
-          <h2 style={{ fontSize: "0.95rem", fontWeight: 500, marginBottom: "0.5rem" }}>
+          <h2
+            style={{
+              fontSize: "0.95rem",
+              fontWeight: 500,
+              marginBottom: "0.5rem",
+            }}
+          >
             Notas rápidas
           </h2>
           <textarea
