@@ -1676,6 +1676,7 @@ function App() {
       </div>
     </div>
   );
+} 
 function KpiCard({ title, value, hint }) {
   return (
     <div className="card">
