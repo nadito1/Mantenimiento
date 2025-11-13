@@ -426,7 +426,7 @@ function App() {
           idxSupervisor === -1
         ) {
           alert(
-            "El CSV no tiene todos los encabezados requeridos.\nRequeridos: FECHA, TURNO, SECTOR, KG PLAN, LINEA, KG PRODUCIDOS, KG REPROCESO, KG DECOMISO, TIEMPO PARADA POR AVERIAS, SUPERVISOR. (NOVEDADES y CUMP PLAN % son opcionales)."
+            "El CSV no tiene todos los encabezados requeridos.\nRequeridos: FECHA, TURNO, SECTOR, KG PLAN, LINEA, KG PRODUCIDOS, KG REPROCESO, KG DECOMISO, TIEMPO PARADA POR AVERIAS, SUPERVISOR. (NOVEDADES es opcional)."
           );
           return;
         }
