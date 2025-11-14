@@ -1,10 +1,3 @@
-// Reorganizado: pestañas (Dashboard | Carga de datos | Dispositivos de control | Configuración)
-// - Filtros y KPIs dentro de la pestaña "Dashboard indicadores"
-// - "Carga de datos" contiene tablas e importación CSV
-// - Pestaña "Dispositivos de control" placeholder
-// - Pestaña "Configuración" permite ajustar horas planificadas, capacidad y supervisores
-//
-// Reemplazar app.jsx por este archivo en tu repo y recargar (Ctrl/Cmd+F5).
 const { useState, useEffect, useMemo, useRef } = React;
 
 // Utilidades
@@ -21,8 +14,8 @@ const download = (filename, data) => {
   URL.revokeObjectURL(url);
 };
 
-// Catálogos por defecto (se pueden editar desde Configuración)
-const DEFAULT_SUPERVISORES = ["ALLOI", "AVILA", "BOERIS"];
+// Catálogos
+const SUPERVISORES = ["ALLOI", "AVILA", "BOERIS"];
 
 const SECTORES = [
   "CHOCOLATE",
@@ -56,10 +49,12 @@ const LINEAS_POR_SECTOR = {
 
 const LINEAS = Array.from(new Set(Object.values(LINEAS_POR_SECTOR).flat()));
 
-const TURNOS = ["M", "T", "N"]; // se mantiene para los formularios aunque ya no haya filtro
+const TURNOS = ["M", "T", "N"]; // se mantiene para formularios
+const AREAS = ["Estuchadora", "Balanza", "Mesas de refrigeración", "Cocción", "Empaque", "Servicios"];
+const TIPOS_PARADA = ["No planificada", "Planificada", "Falta de insumos"];
 const CRITICIDAD = ["A", "B", "C"];
 
-// Helpers
+// Helpers de fecha y números
 const toDate = (s) => new Date(s);
 const inRange = (d, desde, hasta) =>
   d >= new Date(desde + "T00:00") && d <= new Date(hasta + "T23:59:59");
@@ -71,9 +66,8 @@ const parseNumero = (str) => {
   return isFinite(n) ? n : 0;
 };
 
+// Componente principal
 function App() {
-  const [tab, setTab] = useState("dashboard"); // dashboard | carga | dispositivos | config
-
   const [state, setState] = useState(() => {
     const saved = localStorage.getItem("kpi-mantenimiento-georgalos-v2");
     if (saved) {
@@ -93,7 +87,6 @@ function App() {
           ots: parsed.ots ?? [],
           produccion: parsed.produccion ?? [],
           economia: parsed.economia ?? [],
-          supervisores: parsed.supervisores ?? DEFAULT_SUPERVISORES,
         };
       } catch (e) {
         console.error("Error leyendo localStorage", e);
@@ -120,7 +113,6 @@ function App() {
       ots: [],
       produccion: [],
       economia: [],
-      supervisores: DEFAULT_SUPERVISORES,
     };
   });
 
@@ -128,9 +120,6 @@ function App() {
   useEffect(() => {
     localStorage.setItem("kpi-mantenimiento-georgalos-v2", JSON.stringify(state));
   }, [state]);
-
-  const fileInputRef = useRef(null);
-  const fileProdCsvRef = useRef(null);
 
   // Datos por periodo
   const paradasPeriodo = useMemo(
@@ -162,7 +151,7 @@ function App() {
     return ["Todas", ...lines];
   }, [state.filtroSector]);
 
-  // Filtros combinados (fecha + sector/línea/supervisor)
+  // Filtros combinados (fecha + sector/línea/supervisor) — NO hay filtro turno
   const paradasFiltradas = useMemo(
     () =>
       paradasPeriodo.filter((p) => {
@@ -223,7 +212,10 @@ function App() {
   const downtimeHoras = downtimeTotalMin / 60;
   const uptimeHoras = Math.max(0, (Number(state.horasPlanificadas) || 0) - downtimeHoras);
 
-  const MTTR_h = useMemo(() => (fallas > 0 ? downtimeHoras / fallas : 0), [downtimeHoras, fallas]);
+  const MTTR_h = useMemo(
+    () => (fallas > 0 ? downtimeHoras / fallas : 0),
+    [downtimeHoras, fallas]
+  );
   const MTBF_h = useMemo(() => (fallas > 0 ? uptimeHoras / fallas : 0), [uptimeHoras, fallas]);
   const disponibilidad = useMemo(() => {
     const hp = Number(state.horasPlanificadas) || 0;
@@ -247,44 +239,16 @@ function App() {
   const pctCorr = (otsCorr / otsTot) * 100;
 
   // Indicadores producción filtrados
-  const totalKgProd = useMemo(() => produccionFiltrada.reduce((a, r) => a + (r.kgProd || 0), 0), [produccionFiltrada]);
+  const totalKgProd = useMemo(
+    () => produccionFiltrada.reduce((a, r) => a + (r.kgProd || 0), 0),
+    [produccionFiltrada]
+  );
   const avgCumpPlan = useMemo(
     () =>
       produccionFiltrada.length > 0
         ? produccionFiltrada.reduce((a, r) => a + (r.cumpPlan || 0), 0) / produccionFiltrada.length
         : 0,
     [produccionFiltrada]
-  );
-
-  // Resumen por supervisor (producción)
-  const resumenSupervisor = useMemo(() => {
-    const map = {};
-    produccionFiltrada.forEach((r) => {
-      const sup = r.supervisor || "SIN_SUP";
-      if (!map[sup]) map[sup] = { kgProd: 0, kgPlan: 0, filas: 0 };
-      map[sup].kgProd += r.kgProd || 0;
-      map[sup].kgPlan += r.kgPlan || 0;
-      map[sup].filas += 1;
-    });
-    return map;
-  }, [produccionFiltrada]);
-
-  // Gasto mantenimiento / energetico (desde economia + OTs costoARS)
-  const gastoMtoTotalUSD = useMemo(
-    () => state.economia.reduce((a, e) => a + (Number(e.gastoMantenimientoUSD) || 0), 0),
-    [state.economia]
-  );
-  const gastoMtoPorSector = useMemo(() => {
-    const map = {};
-    state.economia.forEach((e) => {
-      const s = e.sector || "SIN_SECTOR";
-      map[s] = (map[s] || 0) + (Number(e.gastoMantenimientoUSD) || 0);
-    });
-    return map;
-  }, [state.economia]);
-  const gastoEnergiaTotalUSD = useMemo(
-    () => state.economia.reduce((a, e) => a + (Number(e.costoEnergiaUSD) || 0), 0),
-    [state.economia]
   );
 
   // Manejo formularios OTs / producción / economía
@@ -356,7 +320,7 @@ function App() {
           kgReproceso: 0,
           kgDecomiso: 0,
           tiempoParadaMin: 0,
-          supervisor: s.supervisores && s.supervisores[0],
+          supervisor: "ALLOI",
           novedades: "",
         },
       ],
@@ -379,7 +343,9 @@ function App() {
     }));
   };
 
-  // Import JSON app state
+  const fileInputRef = useRef(null);
+  const fileProdCsvRef = useRef(null);
+
   const onImport = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -394,7 +360,6 @@ function App() {
           ots: data.ots ?? [],
           produccion: data.produccion ?? [],
           economia: data.economia ?? [],
-          supervisores: data.supervisores ?? s.supervisores,
         }));
       } catch (err) {
         alert("Archivo inválido");
@@ -404,7 +369,12 @@ function App() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // Import producción CSV (usa state.supervisores)
+  const resetData = () => {
+    if (!confirm("¿Vaciar todos los datos del dashboard?")) return;
+    localStorage.removeItem("kpi-mantenimiento-georgalos-v2");
+    location.reload();
+  };
+
   const onImportProduccionCsv = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -452,7 +422,7 @@ function App() {
           idxSupervisor === -1
         ) {
           alert(
-            "El CSV no tiene todos los encabezados requeridos.\nRequeridos: FECHA, TURNO, SECTOR, KG PLAN, LINEA, KG PRODUCIDOS, KG REPROCESO, KG DECOMISO, TIEMPO PARADA POR AVERIAS, SUPERVISOR. (NOVE[...]
+            "El CSV no tiene todos los encabezados requeridos.\nRequeridos: FECHA, TURNO, SECTOR, KG PLAN, LINEA, KG PRODUCIDOS, KG REPROCESO, KG DECOMISO, TIEMPO PARADA POR AVERIAS, SUPERVISOR. (NOVEDADES es opcional)."
           );
           return;
         }
@@ -498,7 +468,8 @@ function App() {
           const tiempoParadaMin = parseNumero(val(idxTiempoParada));
 
           const supRaw = val(idxSupervisor).toUpperCase();
-          const supervisor = state.supervisores.find((s) => s === supRaw) ?? state.supervisores[0];
+          const supervisor =
+            SUPERVISORES.find((s) => s === supRaw) ?? SUPERVISORES[0];
 
           const novedades = idxNovedades !== -1 ? val(idxNovedades) : "";
 
@@ -538,446 +509,1163 @@ function App() {
     if (fileProdCsvRef.current) fileProdCsvRef.current.value = "";
   };
 
-  const resetData = () => {
-    if (!confirm("¿Vaciar todos los datos del dashboard?")) return;
-    localStorage.removeItem("kpi-mantenimiento-georgalos-v2");
-    location.reload();
-  };
+  const [notas, setNotas] = useState(localStorage.getItem("kpi-notas") || "");
+  useEffect(() => {
+    localStorage.setItem("kpi-notas", notas);
+  }, [notas]);
 
-  // Small helpers to update arrays immutably
-  const updateItemIn = (arr, id, patch) => arr.map((x) => (x.id === id ? { ...x, ...patch } : x));
-  const removeItemIn = (arr, id) => arr.filter((x) => x.id !== id);
-
-  // --- Render UI ---
   return (
     <div className="app-root">
       <div className="container">
-        <header style={{ display: "flex", justifyContent: "space-between", gap: "1rem", marginBottom: "1rem", alignItems: "center", flexWrap: "wrap" }}>
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: "1rem",
+            marginBottom: "1.5rem",
+            flexWrap: "wrap",
+          }}
+        >
           <div>
-            <h1 style={{ fontSize: "1.4rem", margin: 0 }}>KPIs & Gestión — Georgalos</h1>
-            <div style={{ fontSize: "0.8rem", color: "#6b7280" }}>Dashboard, carga de datos y configuración</div>
+            <h1 style={{ fontSize: "1.5rem", fontWeight: 600 }}>
+              KPIs de Mantenimiento — Georgalos
+            </h1>
+            <p style={{ fontSize: "0.8rem", color: "#6b7280" }}>
+              MTBF, MTTR, Disponibilidad, % Preventivo/Correctivo, Cumplimiento, Backlog + Producción y Económicos
+            </p>
           </div>
-
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-            <button className="btn" onClick={() => download("kpis-georgalos.json", state)}>Exportar JSON</button>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+            <button
+              className="btn"
+              onClick={() => download("kpis-georgalos.json", state)}
+            >
+              Exportar JSON
+            </button>
             <label className="btn">
               Importar JSON
-              <input ref={fileInputRef} type="file" accept="application/json" style={{ display: "none" }} onChange={onImport} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json"
+                style={{ display: "none" }}
+                onChange={onImport}
+              />
             </label>
-            <button className="btn" onClick={resetData}>Reiniciar</button>
+            <button className="btn" onClick={resetData}>
+              Reiniciar
+            </button>
           </div>
         </header>
 
-        {/* Tabs */}
-        <nav style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <TabButton active={tab === "dashboard"} onClick={() => setTab("dashboard")}>1 · Dashboard indicadores</TabButton>
-          <TabButton active={tab === "carga"} onClick={() => setTab("carga")}>2 · Carga de datos</TabButton>
-          <TabButton active={tab === "dispositivos"} onClick={() => setTab("dispositivos")}>3 · Dispositivos de control</TabButton>
-          <TabButton active={tab === "config"} onClick={() => setTab("config")}>4 · Configuración</TabButton>
-        </nav>
-
-        {/* TAB: DASHBOARD */}
-        {tab === "dashboard" && (
-          <>
-            {/* filtros y top row */}
-            <section style={{ display: "grid", gap: "1rem", marginBottom: "1rem", gridTemplateColumns: "repeat(3, 1fr)" }}>
-              {/* Periodo */}
-              <div className="card">
-                <h3 style={{ marginTop: 0 }}>Periodo</h3>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                  <div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>Desde</div>
-                    <input type="date" value={state.periodoDesde} onChange={(e) => setState((s) => ({ ...s, periodoDesde: e.target.value }))} />
-                  </div>
-                  <div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>Hasta</div>
-                    <input type="date" value={state.periodoHasta} onChange={(e) => setState((s) => ({ ...s, periodoHasta: e.target.value }))} />
-                  </div>
-                  <div style={{ gridColumn: "1 / -1" }}>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>Horas planificadas</div>
-                    <input type="number" min={0} value={state.horasPlanificadas} onChange={(e) => setState((s) => ({ ...s, horasPlanificadas: Number(e.target.value) }))} />
-                  </div>
-                </div>
-              </div>
-
-              {/* Filtros encadenados */}
-              <div className="card">
-                <h3 style={{ marginTop: 0 }}>Filtros</h3>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                  <div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>Sector</div>
-                    <select value={state.filtroSector} onChange={(e) => setState((s) => ({ ...s, filtroSector: e.target.value, filtroLinea: "Todas" }))}>
-                      <option value="Todos">Todos</option>
-                      {SECTORES.map((sec) => <option key={sec} value={sec}>{sec}</option>)}
-                    </select>
-                  </div>
-
-                  <div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>Línea</div>
-                    <select value={state.filtroLinea} onChange={(e) => setState((s) => ({ ...s, filtroLinea: e.target.value }))}>
-                      {opcionesLineas.map((l) => <option key={l} value={l}>{l}</option>)}
-                    </select>
-                  </div>
-
-                  <div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>Supervisor</div>
-                    <select value={state.filtroSupervisor} onChange={(e) => setState((s) => ({ ...s, filtroSupervisor: e.target.value }))}>
-                      <option value="Todos">Todos</option>
-                      {state.supervisores.map((sup) => <option key={sup} value={sup}>{sup}</option>)}
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Capacidad & Backlog */}
-              <div className="card">
-                <h3 style={{ marginTop: 0 }}>Capacidad & Backlog</h3>
-                <div style={{ display: "grid", gap: 8 }}>
-                  <div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>Capacidad HH/semana</div>
-                    <input type="number" min={0} value={state.capacidadHHsemana} onChange={(e) => setState((s) => ({ ...s, capacidadHHsemana: Number(e.target.value) }))} />
-                  </div>
-                  <div style={{ color: "#4b5563" }}>Backlog: <strong>{formatNumber(backlogSemanas, 2)} semanas</strong></div>
-                </div>
-              </div>
-            </section>
-
-            {/* Dashboard – un único card que agrupa KPI bloques */}
-            <section className="card" style={{ marginBottom: 16 }}>
-              <h3 style={{ marginTop: 0 }}>Dashboard de indicadores</h3>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
-                {/* Mantenimiento */}
-                <div className="kpi-block card" style={{ padding: 12 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>KPIs de mantenimiento</div>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <div>MTBF: <strong>{formatNumber(MTBF_h)} h</strong></div>
-                    <div>MTTR: <strong>{formatNumber(MTTR_h)} h</strong></div>
-                    <div>Disponibilidad: <strong>{formatNumber(disponibilidad * 100)} %</strong></div>
-                    <div>Fallas (conteo): <strong>{fallas}</strong></div>
-                  </div>
-                </div>
-
-                {/* Producción */}
-                <div className="kpi-block card" style={{ padding: 12 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>KPIs de producción</div>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <div>Kg producidos (filtro): <strong>{formatNumber(totalKgProd, 0)} kg</strong></div>
-                    <div>Cump. promedio: <strong>{formatNumber(avgCumpPlan)} %</strong></div>
-                    <div>Turnos/filas: <strong>{produccionFiltrada.length}</strong></div>
-                  </div>
-                </div>
-
-                {/* Resumen por supervisor */}
-                <div className="kpi-block card" style={{ padding: 12 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Resumen por supervisor</div>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    {Object.keys(resumenSupervisor).length === 0 && <div style={{ color: "#6b7280" }}>Sin datos en el periodo/filtro</div>}
-                    {Object.entries(resumenSupervisor).map(([sup, vals]) => (
-                      <div key={sup}>
-                        <strong>{sup}</strong>: {formatNumber(vals.kgProd, 0)} kg — filas: {vals.filas}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Gasto total mantenimiento */}
-                <div className="kpi-block card" style={{ padding: 12 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>KPIs: Gasto mantenimiento</div>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <div>Gasto mantenimiento (USD) periodo: <strong>{formatNumber(gastoMtoTotalUSD, 2)}</strong></div>
-                    <div>Gasto energía (USD) periodo: <strong>{formatNumber(gastoEnergiaTotalUSD, 2)}</strong></div>
-                  </div>
-                </div>
-
-                {/* Gasto por sector */}
-                <div className="kpi-block card" style={{ padding: 12 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Gasto mantenimiento por sector</div>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    {Object.keys(gastoMtoPorSector).length === 0 && <div style={{ color: "#6b7280" }}>Sin registros económicos</div>}
-                    {Object.entries(gastoMtoPorSector).map(([s, v]) => (
-                      <div key={s}>{s}: <strong>{formatNumber(v, 2)} USD</strong></div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </section>
-          </>
-        )}
-
-        {/* TAB: CARGA DE DATOS */}
-        {tab === "carga" && (
-          <>
-            <section className="card" style={{ marginBottom: 16 }}>
-              <h3 style={{ marginTop: 0 }}>Tabla de turnos & Importación CSV</h3>
-              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                <button className="btn btn-primary" onClick={addProduccion}>+ Agregar turno</button>
-                <button className="btn" onClick={() => fileProdCsvRef.current && fileProdCsvRef.current.click()}>Importar producción CSV</button>
-                <input ref={fileProdCsvRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={onImportProduccionCsv} />
-              </div>
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Fecha</th>
-                      <th>Turno</th>
-                      <th>Sector</th>
-                      <th>Línea</th>
-                      <th>Kg plan</th>
-                      <th>Kg producidos</th>
-                      <th>Cump. plan %</th>
-                      <th>Kg reproceso</th>
-                      <th>Kg decomiso</th>
-                      <th>Tiempo parada (min)</th>
-                      <th>Supervisor</th>
-                      <th>Novedades</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {state.produccion.length === 0 && (
-                      <tr><td colSpan={13} style={{ padding: 12, color: "#6b7280" }}>Sin datos de producción aún.</td></tr>
-                    )}
-                    {state.produccion.map((r) => (
-                      <tr key={r.id}>
-                        <td><input type="date" value={r.fecha} onChange={(e) => setState((s) => ({ ...s, produccion: updateItemIn(s.produccion, r.id, { fecha: e.target.value }) }))} /></td>
-                        <td>
-                          <select value={r.turno} onChange={(e) => setState((s) => ({ ...s, produccion: updateItemIn(s.produccion, r.id, { turno: e.target.value }) }))}>
-                            {TURNOS.map((t) => <option key={t} value={t}>{t}</option>)}
-                          </select>
-                        </td>
-                        <td>
-                          <select value={r.sector || "CHOCOLATE"} onChange={(e) => {
-                            const nuevoSector = e.target.value;
-                            setState((s) => ({ ...s, produccion: s.produccion.map((x) => x.id === r.id ? { ...x, sector: nuevoSector, linea: (LINEAS_POR_SECTOR[nuevoSector] || []).includes(x.linea) ? x.linea : \"\" } : x) }));
-                          }}>
-                            {SECTORES.map((sec) => <option key={sec} value={sec}>{sec}</option>)}
-                          </select>
-                        </td>
-                        <td>
-                          <select value={r.linea || ""} onChange={(e) => setState((s) => ({ ...s, produccion: updateItemIn(s.produccion, r.id, { linea: e.target.value }) }))}>
-                            <option value="">-</option>
-                            {(LINEAS_POR_SECTOR[r.sector] || []).map((l) => <option key={l} value={l}>{l}</option>)}
-                          </select>
-                        </td>
-                        <td><input type="number" min={0} value={r.kgPlan ?? 0} onChange={(e) => setState((s) => ({ ...s, produccion: updateItemIn(s.produccion, r.id, { kgPlan: Number(e.target.value) }) }))} /></td>
-                        <td><input type="number" min={0} value={r.kgProd ?? 0} onChange={(e) => setState((s) => ({ ...s, produccion: updateItemIn(s.produccion, r.id, { kgProd: Number(e.target.value) }) }))} /></td>
-                        <td><input type="number" min={0} value={r.cumpPlan ?? 0} onChange={(e) => setState((s) => ({ ...s, produccion: updateItemIn(s.produccion, r.id, { cumpPlan: Number(e.target.value) }) }))} /></td>
-                        <td><input type="number" min={0} value={r.kgReproceso ?? 0} onChange={(e) => setState((s) => ({ ...s, produccion: updateItemIn(s.produccion, r.id, { kgReproceso: Number(e.target.value) }) }))} /></td>
-                        <td><input type="number" min={0} value={r.kgDecomiso ?? 0} onChange={(e) => setState((s) => ({ ...s, produccion: updateItemIn(s.produccion, r.id, { kgDecomiso: Number(e.target.value) }) }))} /></td>
-                        <td><input type="number" min={0} value={r.tiempoParadaMin ?? 0} onChange={(e) => setState((s) => ({ ...s, produccion: updateItemIn(s.produccion, r.id, { tiempoParadaMin: Number(e.target.value) }) }))} /></td>
-                        <td>
-                          <select value={r.supervisor || state.supervisores[0]} onChange={(e) => setState((s) => ({ ...s, produccion: updateItemIn(s.produccion, r.id, { supervisor: e.target.value }) }))}>
-                            {state.supervisores.map((sup) => <option key={sup} value={sup}>{sup}</option>)}
-                          </select>
-                        </td>
-                        <td><textarea rows={1} value={r.novedades || ""} onChange={(e) => setState((s) => ({ ...s, produccion: updateItemIn(s.produccion, r.id, { novedades: e.target.value }) }))} /></td>
-                        <td><button className="btn" onClick={() => setState((s) => ({ ...s, produccion: removeItemIn(s.produccion, r.id) }))}>Eliminar</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            {/* OTs correctivos */}
-            <section className="card" style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h3 style={{ marginTop: 0 }}>OTs correctivos</h3>
-                <button className="btn btn-primary" onClick={addOTCorrectiva}>+ Agregar</button>
-              </div>
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Fecha</th>
-                      <th>Línea</th>
-                      <th>Turno</th>
-                      <th>Equipo</th>
-                      <th>Estado</th>
-                      <th>Crit.</th>
-                      <th>HH</th>
-                      <th>$ ARS</th>
-                      <th>Resp.</th>
-                      <th>Prov.</th>
-                      <th>Código SAP</th>
-                      <th>Repuestos</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {otsCorrFiltradas.length === 0 && <tr><td colSpan={13} style={{ padding: 12, color: "#6b7280" }}>Sin OTs correctivas en el periodo.</td></tr>}
-                    {otsCorrFiltradas.map((o) => (
-                      <tr key={o.id}>
-                        <td><input type="date" value={o.fecha} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { fecha: e.target.value }) }))} /></td>
-                        <td>
-                          <select value={o.linea} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { linea: e.target.value }) }))}>
-                            <option value="">-</option>
-                            {LINEAS.map((l) => <option key={l} value={l}>{l}</option>)}
-                          </select>
-                        </td>
-                        <td>
-                          <select value={o.turno} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { turno: e.target.value }) }))}>
-                            {TURNOS.map((t) => <option key={t} value={t}>{t}</option>)}
-                          </select>
-                        </td>
-                        <td><input type="text" value={o.equipo || ""} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { equipo: e.target.value }) }))} /></td>
-                        <td>
-                          <select value={o.estado} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { estado: e.target.value }) }))}>
-                            <option>Planificada</option>
-                            <option>En curso</option>
-                            <option>Completada</option>
-                            <option>Cancelada</option>
-                          </select>
-                        </td>
-                        <td>
-                          <select value={o.criticidad} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { criticidad: e.target.value }) }))}>
-                            {CRITICIDAD.map((c) => <option key={c} value={c}>{c}</option>)}
-                          </select>
-                        </td>
-                        <td><input type="number" min={0} value={o.hh ?? 0} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { hh: Number(e.target.value) }) }))} /></td>
-                        <td><input type="number" min={0} value={o.costoARS ?? 0} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { costoARS: Number(e.target.value) }) }))} /></td>
-                        <td><input type="text" value={o.responsable || ""} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { responsable: e.target.value }) }))} /></td>
-                        <td><input type="text" value={o.proveedor || ""} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { proveedor: e.target.value }) }))} /></td>
-                        <td><input type="text" value={o.codigoSAP || ""} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { codigoSAP: e.target.value }) }))} /></td>
-                        <td><input type="text" value={o.repuestos || ""} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { repuestos: e.target.value }) }))} /></td>
-                        <td><button className="btn" onClick={() => setState((s) => ({ ...s, ots: removeItemIn(s.ots, o.id) }))}>Eliminar</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            {/* OTs preventivos */}
-            <section className="card">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h3 style={{ marginTop: 0 }}>OTs preventivos</h3>
-                <button className="btn btn-primary" onClick={addOTPreventiva}>+ Agregar plan</button>
-              </div>
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Fecha plan</th>
-                      <th>Fecha ejec</th>
-                      <th>Línea</th>
-                      <th>Equipo</th>
-                      <th>Estado</th>
-                      <th>Resp.</th>
-                      <th>HH</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {otsPrevFiltradas.length === 0 && <tr><td colSpan={8} style={{ padding: 12, color: "#6b7280" }}>Sin preventivos planificados.</td></tr>}
-                    {otsPrevFiltradas.map((o) => (
-                      <tr key={o.id}>
-                        <td><input type="date" value={o.fecha} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { fecha: e.target.value }) }))} /></td>
-                        <td><input type="date" value={o.fechaEjec || ""} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { fechaEjec: e.target.value }) }))} /></td>
-                        <td>
-                          <select value={o.linea} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { linea: e.target.value }) }))}>
-                            <option value="">-</option>
-                            {LINEAS.map((l) => <option key={l} value={l}>{l}</option>)}
-                          </select>
-                        </td>
-                        <td><input type="text" value={o.equipo || ""} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { equipo: e.target.value }) }))} /></td>
-                        <td>
-                          <select value={o.estado} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { estado: e.target.value }) }))}>
-                            <option>Planificada</option>
-                            <option>En curso</option>
-                            <option>Completada</option>
-                            <option>Cancelada</option>
-                          </select>
-                        </td>
-                        <td><input type="text" value={o.responsable || ""} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { responsable: e.target.value }) }))} /></td>
-                        <td><input type="number" min={0} value={o.hh ?? 0} onChange={(e) => setState((s) => ({ ...s, ots: updateItemIn(s.ots, o.id, { hh: Number(e.target.value) }) }))} /></td>
-                        <td><button className="btn" onClick={() => setState((s) => ({ ...s, ots: removeItemIn(s.ots, o.id) }))}>Eliminar</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          </>
-        )}
-
-        {/* TAB: DISPOSITIVOS DE CONTROL (placeholder) */}
-        {tab === "dispositivos" && (
-          <section className="card">
-            <h3 style={{ marginTop: 0 }}>Dispositivos de control</h3>
-            <div style={{ color: "#6b7280" }}>Pestaña reservada. Aquí desarrollaremos los controles, visualizaciones y acciones relacionadas con dispositivos (sensores, actuadores, alarmas, etc.).</div>
-          </section>
-        )}
-
-        {/* TAB: CONFIGURACIÓN */}
-        {tab === "config" && (
-          <section className="card">
-            <h3 style={{ marginTop: 0 }}>Configuración</h3>
-
-            <div style={{ display: "grid", gap: 12, maxWidth: 800 }}>
+        {/* Top row: 3 cards (Periodo | Filtros encadenados (sin Turno) | Capacidad & Backlog) */}
+        <section
+          style={{
+            display: "grid",
+            gap: "1rem",
+            marginBottom: "1rem",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            alignItems: "start",
+          }}
+        >
+          {/* Periodo */}
+          <div className="card">
+            <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>Periodo</h2>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "0.5rem",
+                fontSize: "0.75rem",
+              }}
+            >
               <div>
-                <div style={{ color: "#6b7280", fontSize: 12 }}>Horas planificadas (período)</div>
-                <input type="number" min={0} value={state.horasPlanificadas} onChange={(e) => setState((s) => ({ ...s, horasPlanificadas: Number(e.target.value) }))} />
+                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Desde</div>
+                <input
+                  type="date"
+                  value={state.periodoDesde}
+                  onChange={(e) =>
+                    setState((s) => ({ ...s, periodoDesde: e.target.value }))
+                  }
+                />
               </div>
-
               <div>
-                <div style={{ color: "#6b7280", fontSize: 12 }}>Capacidad HH/semana</div>
-                <input type="number" min={0} value={state.capacidadHHsemana} onChange={(e) => setState((s) => ({ ...s, capacidadHHsemana: Number(e.target.value) }))} />
+                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Hasta</div>
+                <input
+                  type="date"
+                  value={state.periodoHasta}
+                  onChange={(e) =>
+                    setState((s) => ({ ...s, periodoHasta: e.target.value }))
+                  }
+                />
               </div>
-
-              <div>
-                <div style={{ color: "#6b7280", fontSize: 12 }}>Supervisores (coma separado)</div>
-                <textarea rows={2} value={state.supervisores.join(", ")} onChange={(e) => {
-                  const arr = e.target.value.split(",").map(s => s.trim()).filter(Boolean);
-                  setState((s) => ({ ...s, supervisores: arr }));
-                }} />
-                <div style={{ fontSize: 12, color: "#6b7280" }}>Guarda la lista para que aparezca en los selects de producción y filtros.</div>
-              </div>
-
-              <div>
-                <button className="btn btn-primary" onClick={() => { localStorage.setItem("kpi-mantenimiento-georgalos-v2", JSON.stringify(state)); alert("Configuración guardada en localStorage."); }}>Guardar</button>
-                <button className="btn" style={{ marginLeft: 8 }} onClick={() => { setState((s) => ({ ...s, supervisores: DEFAULT_SUPERVISORES })); }}>Restaurar supervisores por defecto</button>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>
+                  Horas planificadas
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  value={state.horasPlanificadas}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      horasPlanificadas: Number(e.target.value),
+                    }))
+                  }
+                />
               </div>
             </div>
-          </section>
-        )}
+          </div>
 
-        <footer style={{ fontSize: "0.75rem", color: "#9ca3af", textAlign: "center", padding: "1.2rem 0" }}>
-          Tablero local (localStorage). Próximo paso: Firestore / autenticación usuarios.
+          {/* Filtros encadenados: Sector -> Línea -> Supervisor */}
+          <div className="card">
+            <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>Filtros</h2>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: "0.5rem",
+                fontSize: "0.75rem",
+              }}
+            >
+              <div>
+                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Sector</div>
+                <select
+                  value={state.filtroSector}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      filtroSector: e.target.value,
+                      filtroLinea: "Todas",
+                    }))
+                  }
+                >
+                  <option value="Todos">Todos</option>
+                  {SECTORES.map((sec) => (
+                    <option key={sec} value={sec}>
+                      {sec}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Línea</div>
+                <select
+                  value={state.filtroLinea}
+                  onChange={(e) => setState((s) => ({ ...s, filtroLinea: e.target.value }))}
+                >
+                  {opcionesLineas.map((l) => (
+                    <option key={l} value={l}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Supervisor</div>
+                <select
+                  value={state.filtroSupervisor}
+                  onChange={(e) =>
+                    setState((s) => ({ ...s, filtroSupervisor: e.target.value }))
+                  }
+                >
+                  <option value="Todos">Todos</option>
+                  {SUPERVISORES.map((sup) => (
+                    <option key={sup} value={sup}>
+                      {sup}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Capacidad & Backlog */}
+          <div className="card">
+            <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>
+              Capacidad & Backlog
+            </h2>
+            <div style={{ fontSize: "0.75rem", display: "grid", gap: "0.5rem" }}>
+              <div>
+                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>
+                  Capacidad HH/semana
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  value={state.capacidadHHsemana}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      capacidadHHsemana: Number(e.target.value),
+                    }))
+                  }
+                />
+              </div>
+              <div style={{ fontSize: "0.8rem", color: "#4b5563" }}>
+                Backlog:{" "}
+                <span style={{ fontWeight: 600 }}>
+                  {formatNumber(backlogSemanas, 2)} semanas
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Dashboard de indicadores (card único debajo) */}
+        <section className="card" style={{ marginBottom: "1.5rem" }}>
+          <h2 style={{ fontSize: "0.95rem", marginBottom: "0.6rem", fontWeight: 500 }}>
+            Dashboard de indicadores
+          </h2>
+          <div className="kpi-grid" style={{ marginTop: 4 }}>
+            <KpiCard title="MTBF" value={`${formatNumber(MTBF_h)} h`} hint={`${fallas} fallas`} />
+            <KpiCard
+              title="MTTR"
+              value={`${formatNumber(MTTR_h)} h`}
+              hint={`${formatNumber(downtimeHoras)} h paro`}
+            />
+            <KpiCard
+              title="Disponibilidad"
+              value={`${formatNumber(disponibilidad * 100)} %`}
+              hint={`${formatNumber(uptimeHoras)} h uptime`}
+            />
+            <KpiCard
+              title="Cumplimiento plan prev."
+              value={`${formatNumber(cumplimientoPlan)} %`}
+              hint={`${otsCompletadas}/${otsCompletadas + otsPlanificadas || 0}`}
+            />
+            <KpiCard
+              title="% Preventivo"
+              value={`${formatNumber(pctPrev)} %`}
+              hint={`${otsPrev}/${otsFiltradas.length} OTs`}
+            />
+            <KpiCard
+              title="% Correctivo"
+              value={`${formatNumber(pctCorr)} %`}
+              hint={`${otsCorr}/${otsFiltradas.length} OTs`}
+            />
+            <KpiCard
+              title="Kg producidos (filtro)"
+              value={`${formatNumber(totalKgProd, 0)} kg`}
+              hint={`Cump. promedio: ${formatNumber(avgCumpPlan)} %`}
+            />
+          </div>
+        </section>
+
+        {/* OTs Correctivas */}
+        <section className="card" style={{ marginBottom: "1.5rem" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "0.75rem",
+              gap: "0.75rem",
+            }}
+          >
+            <h2 style={{ fontSize: "0.95rem", fontWeight: 500 }}>
+              Órdenes de Trabajo — Correctivas
+            </h2>
+            <button className="btn btn-primary" onClick={addOTCorrectiva}>
+              + Agregar
+            </button>
+          </div>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Línea</th>
+                  <th>Turno</th>
+                  <th>Equipo</th>
+                  <th>Estado</th>
+                  <th>Crit.</th>
+                  <th>HH</th>
+                  <th>$ ARS</th>
+                  <th>Resp.</th>
+                  <th>Prov.</th>
+                  <th>Código SAP</th>
+                  <th>Repuestos</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {otsCorrFiltradas.length === 0 && (
+                  <tr>
+                    <td colSpan={13} style={{ padding: "0.75rem", color: "#6b7280" }}>
+                      Sin OTs correctivas en el filtro actual.
+                    </td>
+                  </tr>
+                )}
+                {otsCorrFiltradas.map((o) => (
+                  <tr key={o.id}>
+                    <td>
+                      <input
+                        type="date"
+                        value={o.fecha}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id ? { ...x, fecha: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={o.linea}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id ? { ...x, linea: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      >
+                        <option value="">-</option>
+                        {LINEAS.map((l) => (
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        value={o.turno}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id ? { ...x, turno: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      >
+                        {TURNOS.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={o.equipo}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id ? { ...x, equipo: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={o.estado}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id ? { ...x, estado: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      >
+                        <option>Planificada</option>
+                        <option>En curso</option>
+                        <option>Completada</option>
+                        <option>Cancelada</option>
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        value={o.criticidad}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id ? { ...x, criticidad: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      >
+                        {CRITICIDAD.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={o.hh ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id ? { ...x, hh: Number(e.target.value) } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={o.costoARS ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id
+                                ? { ...x, costoARS: Number(e.target.value) }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={o.responsable || ""}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id
+                                ? { ...x, responsable: e.target.value }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={o.proveedor || ""}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id
+                                ? { ...x, proveedor: e.target.value }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={o.codigoSAP || ""}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id
+                                ? { ...x, codigoSAP: e.target.value }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={o.repuestos || ""}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id
+                                ? { ...x, repuestos: e.target.value }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.filter((x) => x.id !== o.id),
+                          }))
+                        }
+                      >
+                        Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "#6b7280" }}>
+            OTs correctivas: {otsCorrFiltradas.length} — Completadas:{" "}
+            {otsCorrFiltradas.filter((o) => o.estado === "Completada").length}
+          </div>
+        </section>
+
+        {/* Preventivos */}
+        <section className="card" style={{ marginBottom: "1.5rem" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "0.75rem",
+              gap: "0.75rem",
+            }}
+          >
+            <h2 style={{ fontSize: "0.95rem", fontWeight: 500 }}>
+              Preventivos — Cumplimiento & Ejecución
+            </h2>
+            <button className="btn btn-primary" onClick={addOTPreventiva}>
+              + Agregar plan
+            </button>
+          </div>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha plan</th>
+                  <th>Fecha ejec</th>
+                  <th>Línea</th>
+                  <th>Equipo</th>
+                  <th>Estado</th>
+                  <th>Resp.</th>
+                  <th>HH</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {otsPrevFiltradas.length === 0 && (
+                  <tr>
+                    <td colSpan={8} style={{ padding: "0.75rem", color: "#6b7280" }}>
+                      Sin preventivos planificados en el filtro actual.
+                    </td>
+                  </tr>
+                )}
+                {otsPrevFiltradas.map((o) => (
+                  <tr key={o.id}>
+                    <td>
+                      <input
+                        type="date"
+                        value={o.fecha}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id ? { ...x, fecha: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="date"
+                        value={o.fechaEjec || ""}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id ? { ...x, fechaEjec: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={o.linea}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id ? { ...x, linea: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      >
+                        <option value="">-</option>
+                        {LINEAS.map((l) => (
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={o.equipo}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id ? { ...x, equipo: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={o.estado}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id ? { ...x, estado: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      >
+                        <option>Planificada</option>
+                        <option>En curso</option>
+                        <option>Completada</option>
+                        <option>Cancelada</option>
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={o.responsable || ""}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id
+                                ? { ...x, responsable: e.target.value }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={o.hh ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.map((x) =>
+                              x.id === o.id ? { ...x, hh: Number(e.target.value) } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          setState((s) => ({
+                            ...s,
+                            ots: s.ots.filter((x) => x.id !== o.id),
+                          }))
+                        }
+                      >
+                        Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#374151" }}>
+            <span className="badge">
+              Planificados: {otsPrevFiltradas.length}
+            </span>{" "}
+            <span className="badge" style={{ marginLeft: 6 }}>
+              Completados:{" "}
+              {otsPrevFiltradas.filter((o) => o.estado === "Completada").length}
+            </span>{" "}
+            <span className="badge" style={{ marginLeft: 6 }}>
+              Cumplimiento:{" "}
+              {formatNumber(
+                (otsPrevFiltradas.filter((o) => o.estado === "Completada").length /
+                  Math.max(1, otsPrevFiltradas.length)) *
+                  100
+              )}
+              %
+            </span>
+          </div>
+        </section>
+
+        {/* Producción */}
+        <section className="card" style={{ marginBottom: "1.5rem" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "0.75rem",
+              gap: "0.75rem",
+              flexWrap: "wrap",
+            }}
+          >
+            <h2 style={{ fontSize: "0.95rem", fontWeight: 500 }}>
+              Producción — Importación CSV
+            </h2>
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <button className="btn btn-primary" onClick={addProduccion}>
+                + Agregar turno
+              </button>
+              <button
+                className="btn"
+                onClick={() => fileProdCsvRef.current && fileProdCsvRef.current.click()}
+              >
+                Importar producción CSV
+              </button>
+              <input
+                ref={fileProdCsvRef}
+                type="file"
+                accept=".csv,text/csv"
+                style={{ display: "none" }}
+                onChange={onImportProduccionCsv}
+              />
+            </div>
+          </div>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Turno</th>
+                  <th>Sector</th>
+                  <th>Línea</th>
+                  <th>Kg plan</th>
+                  <th>Kg producidos</th>
+                  <th>Cump. plan %</th>
+                  <th>Kg reproceso</th>
+                  <th>Kg decomiso</th>
+                  <th>Tiempo parada (min)</th>
+                  <th>Supervisor</th>
+                  <th>Novedades</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {state.produccion.length === 0 && (
+                  <tr>
+                    <td colSpan={13} style={{ padding: "0.75rem", color: "#6b7280" }}>
+                      Sin datos de producción aún. Importá el CSV desde el sistema o cargá un turno manualmente.
+                    </td>
+                  </tr>
+                )}
+                {state.produccion.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <input
+                        type="date"
+                        value={r.fecha}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, fecha: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={r.turno}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, turno: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      >
+                        {TURNOS.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        value={r.sector || "CHOCOLATE"}
+                        onChange={(e) => {
+                          const nuevoSector = e.target.value;
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id
+                                ? {
+                                    ...x,
+                                    sector: nuevoSector,
+                                    linea: (LINEAS_POR_SECTOR[nuevoSector] || []).includes(x.linea)
+                                      ? x.linea
+                                      : "",
+                                  }
+                                : x
+                            ),
+                          }));
+                        }}
+                      >
+                        {SECTORES.map((sec) => (
+                          <option key={sec} value={sec}>
+                            {sec}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        value={r.linea || ""}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, linea: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      >
+                        <option value="">-</option>
+                        {(LINEAS_POR_SECTOR[r.sector] || []).map((l) => (
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.kgPlan ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, kgPlan: Number(e.target.value) } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.kgProd ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, kgProd: Number(e.target.value) } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.cumpPlan ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, cumpPlan: Number(e.target.value) } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.kgReproceso ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, kgReproceso: Number(e.target.value) } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.kgDecomiso ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, kgDecomiso: Number(e.target.value) } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.tiempoParadaMin ?? 0}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, tiempoParadaMin: Number(e.target.value) } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={r.supervisor || "ALLOI"}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, supervisor: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      >
+                        {SUPERVISORES.map((sup) => (
+                          <option key={sup} value={sup}>
+                            {sup}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <textarea
+                        rows={1}
+                        value={r.novedades || ""}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.map((x) =>
+                              x.id === r.id ? { ...x, novedades: e.target.value } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          setState((s) => ({
+                            ...s,
+                            produccion: s.produccion.filter((x) => x.id !== r.id),
+                          }))
+                        }
+                      >
+                        Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Datos Económicos */}
+        <section className="card" style={{ marginBottom: "1.5rem" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "0.75rem",
+              gap: "0.75rem",
+            }}
+          >
+            <h2 style={{ fontSize: "0.95rem", fontWeight: 500 }}>
+              Datos Económicos (carga manual mensual)
+            </h2>
+            <button className="btn btn-primary" onClick={addEconomia}>
+              + Agregar registro
+            </button>
+          </div>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Periodo (AAAA-MM)</th>
+                  <th>Sector / Línea</th>
+                  <th>Gasto mantenimiento (USD)</th>
+                  <th>Costo energía (USD)</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {state.economia.length === 0 && (
+                  <tr>
+                    <td colSpan={5} style={{ padding: "0.75rem", color: "#6b7280" }}>
+                      Sin registros económicos aún. Cargá un registro por mes y sector.
+                    </td>
+                  </tr>
+                )}
+                {state.economia.map((e) => (
+                  <tr key={e.id}>
+                    <td>
+                      <input
+                        type="month"
+                        value={e.periodo}
+                        onChange={(ev) =>
+                          setState((s) => ({
+                            ...s,
+                            economia: s.economia.map((x) =>
+                              x.id === e.id ? { ...x, periodo: ev.target.value } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={e.sector || ""}
+                        onChange={(ev) =>
+                          setState((s) => ({
+                            ...s,
+                            economia: s.economia.map((x) =>
+                              x.id === e.id ? { ...x, sector: ev.target.value } : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={e.gastoMantenimientoUSD ?? 0}
+                        onChange={(ev) =>
+                          setState((s) => ({
+                            ...s,
+                            economia: s.economia.map((x) =>
+                              x.id === e.id
+                                ? {
+                                    ...x,
+                                    gastoMantenimientoUSD: Number(ev.target.value),
+                                  }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={e.costoEnergiaUSD ?? 0}
+                        onChange={(ev) =>
+                          setState((s) => ({
+                            ...s,
+                            economia: s.economia.map((x) =>
+                              x.id === e.id
+                                ? {
+                                    ...x,
+                                    costoEnergiaUSD: Number(ev.target.value),
+                                  }
+                                : x
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          setState((s) => ({
+                            ...s,
+                            economia: s.economia.filter((x) => x.id !== e.id),
+                          }))
+                        }
+                      >
+                        Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Notas */}
+        <section className="card" style={{ marginBottom: "2rem" }}>
+          <h2 style={{ fontSize: "0.95rem", fontWeight: 500, marginBottom: "0.5rem" }}>
+            Notas rápidas
+          </h2>
+          <textarea
+            rows={2}
+            placeholder="Escribí ideas, decisiones o pendientes de mantenimiento…"
+            value={notas}
+            onChange={(e) => setNotas(e.target.value)}
+            style={{ width: "100%", resize: "vertical", fontSize: "0.8rem" }}
+          />
+        </section>
+
+        <footer
+          style={{
+            fontSize: "0.7rem",
+            color: "#9ca3af",
+            textAlign: "center",
+            paddingBottom: "1.5rem",
+          }}
+        >
+          Tablero local (localStorage). Próximo paso: Firestore + usuarios de planta.
         </footer>
       </div>
     </div>
   );
 }
-
-/* UI helpers */
-function TabButton({ children, active, onClick }) {
-  return (
-    <button onClick={onClick} className={`tab-btn ${active ? "active" : ""}`} style={{
-      padding: "8px 12px",
-      borderRadius: 6,
-      border: active ? "1px solid #2b6cb0" : "1px solid #e5e7eb",
-      background: active ? "#ebf8ff" : "#fff",
-      cursor: "pointer"
-    }}>
-      {children}
-    </button>
-  );
-}
-
 function KpiCard({ title, value, hint }) {
   return (
-    <div className="card" style={{ padding: 10 }}>
-      <div style={{ fontSize: 12, color: "#6b7280" }}>{title}</div>
-      <div style={{ fontWeight: 700, fontSize: 18 }}>{value}</div>
-      {hint && <div style={{ fontSize: 12, color: "#9ca3af" }}>{hint}</div>}
+    <div className="card">
+      <div className="kpi-card-title">{title}</div>
+      <div className="kpi-card-value">{value}</div>
+      {hint && <div className="kpi-card-hint">{hint}</div>}
     </div>
   );
 }
-
-/* small helpers used above (immutables) */
-const updateItemIn = (arr, id, patch) => arr.map((x) => (x.id === id ? { ...x, ...patch } : x));
-const removeItemIn = (arr, id) => arr.filter((x) => x.id !== id);
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
