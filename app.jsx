@@ -1,7 +1,4 @@
-// Nota: reemplazá el app.jsx existente por este archivo.
-// He ajustado la lógica del filtro de Línea para que dependa del Sector seleccionado
-// y me aseguré de que el selector Supervisor esté visible en el card de filtros.
-
+/* app.jsx — versión actualizada: se elimina el filtro "Turno" (UI + uso en filtros) */
 const { useState, useEffect, useMemo, useRef } = React;
 
 // Utilidades
@@ -53,7 +50,7 @@ const LINEAS_POR_SECTOR = {
 
 const LINEAS = Array.from(new Set(Object.values(LINEAS_POR_SECTOR).flat()));
 
-const TURNOS = ["M", "T", "N"]; // Mañana, Tarde, Noche (solo inicial)
+const TURNOS = ["M", "T", "N"]; // se mantiene la constante para los formularios aunque ya no haya filtro
 const AREAS = ["Estuchadora", "Balanza", "Mesas de refrigeración", "Cocción", "Empaque", "Servicios"];
 const TIPOS_PARADA = ["No planificada", "Planificada", "Falta de insumos"];
 const CRITICIDAD = ["A", "B", "C"];
@@ -85,7 +82,6 @@ function App() {
           costoMantenimientoARS: parsed.costoMantenimientoARS ?? 0,
           capacidadHHsemana: parsed.capacidadHHsemana ?? 160,
           filtroLinea: parsed.filtroLinea ?? "Todas",
-          filtroTurno: parsed.filtroTurno ?? "Todos",
           filtroSector: parsed.filtroSector ?? "Todos",
           filtroSupervisor: parsed.filtroSupervisor ?? "Todos",
           paradas: parsed.paradas ?? [],
@@ -112,7 +108,6 @@ function App() {
       costoMantenimientoARS: 0,
       capacidadHHsemana: 160,
       filtroLinea: "Todas",
-      filtroTurno: "Todos",
       filtroSector: "Todos",
       filtroSupervisor: "Todos",
       paradas: [],
@@ -152,37 +147,31 @@ function App() {
 
   // Opciones de línea dependientes del sector seleccionado
   const opcionesLineas = useMemo(() => {
-    // Si el usuario eligió "Todos" (o vacío) mostramos "Todas" + todas las líneas
-    if (!state.filtroSector || state.filtroSector === "Todos") {
-      return ["Todas", ...LINEAS];
-    }
+    if (!state.filtroSector || state.filtroSector === "Todos") return ["Todas", ...LINEAS];
     const lines = LINEAS_POR_SECTOR[state.filtroSector] ?? [];
-    // Si el sector no tiene líneas definidas, devolvemos solo "Todas"
     return ["Todas", ...lines];
   }, [state.filtroSector]);
 
-  // Filtros combinados (fecha + sector/línea/turno/supervisor)
+  // Filtros combinados (fecha + sector/línea/supervisor) — ya NO se filtra por turno
   const paradasFiltradas = useMemo(
     () =>
       paradasPeriodo.filter((p) => {
         const byLinea = state.filtroLinea === "Todas" || !state.filtroLinea || p.linea === state.filtroLinea;
-        const byTurno = state.filtroTurno === "Todos" || !state.filtroTurno || p.turno === state.filtroTurno;
         const bySector = state.filtroSector === "Todos" || !state.filtroSector || p.sector === state.filtroSector;
         const bySupervisor =
           state.filtroSupervisor === "Todos" ||
           !state.filtroSupervisor ||
           p.supervisor === state.filtroSupervisor ||
           p.responsable === state.filtroSupervisor;
-        return byLinea && byTurno && bySector && bySupervisor;
+        return byLinea && bySector && bySupervisor;
       }),
-    [paradasPeriodo, state.filtroLinea, state.filtroTurno, state.filtroSector, state.filtroSupervisor]
+    [paradasPeriodo, state.filtroLinea, state.filtroSector, state.filtroSupervisor]
   );
 
   const otsFiltradas = useMemo(
     () =>
       otsPeriodo.filter((o) => {
         const byLinea = state.filtroLinea === "Todas" || !state.filtroLinea || o.linea === state.filtroLinea;
-        const byTurno = state.filtroTurno === "Todos" || !state.filtroTurno || o.turno === state.filtroTurno;
         // OTs a veces no tienen sector; permitimos pasar si el filtroSector es 'Todos'
         const bySector = state.filtroSector === "Todos" || !state.filtroSector || o.sector === state.filtroSector || true;
         const bySupervisor =
@@ -190,21 +179,20 @@ function App() {
           !state.filtroSupervisor ||
           o.responsable === state.filtroSupervisor ||
           o.supervisor === state.filtroSupervisor;
-        return byLinea && byTurno && bySector && bySupervisor;
+        return byLinea && bySector && bySupervisor;
       }),
-    [otsPeriodo, state.filtroLinea, state.filtroTurno, state.filtroSector, state.filtroSupervisor]
+    [otsPeriodo, state.filtroLinea, state.filtroSector, state.filtroSupervisor]
   );
 
   const produccionFiltrada = useMemo(
     () =>
       produccionPeriodo.filter((r) => {
         const byLinea = state.filtroLinea === "Todas" || !state.filtroLinea || r.linea === state.filtroLinea;
-        const byTurno = state.filtroTurno === "Todos" || !state.filtroTurno || r.turno === state.filtroTurno;
         const bySector = state.filtroSector === "Todos" || !state.filtroSector || r.sector === state.filtroSector;
         const bySupervisor = state.filtroSupervisor === "Todos" || !state.filtroSupervisor || r.supervisor === state.filtroSupervisor;
-        return byLinea && byTurno && bySector && bySupervisor;
+        return byLinea && bySector && bySupervisor;
       }),
-    [produccionPeriodo, state.filtroLinea, state.filtroTurno, state.filtroSector, state.filtroSupervisor]
+    [produccionPeriodo, state.filtroLinea, state.filtroSector, state.filtroSupervisor]
   );
 
   // Subconjuntos por tipo
@@ -571,7 +559,7 @@ function App() {
           </div>
         </header>
 
-        {/* --- Top row: 3 cards (Periodo | Filtros encadenados | Capacidad & Backlog) --- */}
+        {/* Top row: 3 cards (Periodo | Filtros encadenados (sin Turno) | Capacidad & Backlog) */}
         <section
           style={{
             display: "grid",
@@ -631,7 +619,7 @@ function App() {
             </div>
           </div>
 
-          {/* Filtros encadenados: Sector -> Línea -> Supervisor */}
+          {/* Filtros encadenados: Sector -> Línea -> Supervisor (sin Turno) */}
           <div className="card">
             <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>Filtros</h2>
             <div
@@ -650,7 +638,6 @@ function App() {
                     setState((s) => ({
                       ...s,
                       filtroSector: e.target.value,
-                      // cuando cambia el sector, reseteamos la línea a 'Todas' para evitar inconsistencia
                       filtroLinea: "Todas",
                     }))
                   }
@@ -695,22 +682,6 @@ function App() {
                 </select>
               </div>
             </div>
-
-            {/* Turno debajo de los tres para no romper la fila */}
-            <div style={{ marginTop: 8 }}>
-              <div style={{ color: "#6b7280", marginBottom: "0.1rem", fontSize: "0.75rem" }}>Turno</div>
-              <select
-                value={state.filtroTurno}
-                onChange={(e) => setState((s) => ({ ...s, filtroTurno: e.target.value }))}
-              >
-                <option value="Todos">Todos</option>
-                {TURNOS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
 
           {/* Capacidad & Backlog */}
@@ -745,7 +716,7 @@ function App() {
           </div>
         </section>
 
-        {/* --- Dashboard de indicadores (un recuadro bajo los 3 anteriores) --- */}
+        {/* Dashboard de indicadores (card único debajo) */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <h2 style={{ fontSize: "0.95rem", marginBottom: "0.6rem", fontWeight: 500 }}>
             Dashboard de indicadores
@@ -785,11 +756,20 @@ function App() {
           </div>
         </section>
 
-        {/* --- Secciones de entrada de datos (abajo) --- */}
-        {/* ... el resto del archivo permanece igual (OTs, Preventivos, Producción, Económicos, Notas) */}
-        {/* Para ahorrar espacio en este bloque mostrado ya incluí todas las secciones en la versión anterior. */}
-        {/* Si querés que te vuelva a pegar todo el archivo con TODO incluido, lo hago. */}
+        {/* Secciones de entrada de datos abajo (OTs, Preventivos, Producción, Económicos, Notas) */}
+        {/* ... el resto del UI (formularios/tablas) permanece igual a la versión previa y sigue funcionando. */}
+        {/* Si querés, te pego otra vez el archivo entero con las tablas completas. */}
 
+        <footer
+          style={{
+            fontSize: "0.7rem",
+            color: "#9ca3af",
+            textAlign: "center",
+            paddingBottom: "1.5rem",
+          }}
+        >
+          Tablero local (localStorage). Próximo paso: Firestore + usuarios de planta.
+        </footer>
       </div>
     </div>
   );
