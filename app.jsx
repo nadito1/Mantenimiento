@@ -123,7 +123,7 @@ function App() {
     localStorage.setItem("kpi-mantenimiento-georgalos-v2", JSON.stringify(state));
   }, [state]);
 
-  // Filtros por período
+  // Datos por periodo
   const paradasPeriodo = useMemo(
     () =>
       state.paradas.filter((p) => inRange(toDate(p.fecha), state.periodoDesde, state.periodoHasta)),
@@ -146,15 +146,23 @@ function App() {
     [state.produccion, state.periodoDesde, state.periodoHasta]
   );
 
-  // Filtros combinados (fecha + línea/turno/sector/supervisor)
+  // Helpers para opciones de línea según sector seleccionado
+  const opcionesLineas = useMemo(() => {
+    if (!state.filtroSector || state.filtroSector === "Todos") return ["Todas", ...LINEAS];
+    const lines = LINEAS_POR_SECTOR[state.filtroSector] ?? [];
+    return ["Todas", ...lines];
+  }, [state.filtroSector]);
+
+  // Filtros combinados (fecha + sector/línea/turno/supervisor)
   const paradasFiltradas = useMemo(
     () =>
       paradasPeriodo.filter((p) => {
-        const byLinea = state.filtroLinea === "Todas" || p.linea === state.filtroLinea;
-        const byTurno = state.filtroTurno === "Todos" || p.turno === state.filtroTurno;
-        const bySector = state.filtroSector === "Todos" || p.sector === state.filtroSector;
+        const byLinea = state.filtroLinea === "Todas" || !state.filtroLinea || p.linea === state.filtroLinea;
+        const byTurno = state.filtroTurno === "Todos" || !state.filtroTurno || p.turno === state.filtroTurno;
+        const bySector = state.filtroSector === "Todos" || !state.filtroSector || p.sector === state.filtroSector;
         const bySupervisor =
           state.filtroSupervisor === "Todos" ||
+          !state.filtroSupervisor ||
           p.supervisor === state.filtroSupervisor ||
           p.responsable === state.filtroSupervisor;
         return byLinea && byTurno && bySector && bySupervisor;
@@ -165,12 +173,12 @@ function App() {
   const otsFiltradas = useMemo(
     () =>
       otsPeriodo.filter((o) => {
-        const byLinea = state.filtroLinea === "Todas" || o.linea === state.filtroLinea;
-        const byTurno = state.filtroTurno === "Todos" || o.turno === state.filtroTurno;
-        // OTs no siempre tienen sector/supervisor; aplicamos si existen o permitimos 'Todos'
-        const bySector = state.filtroSector === "Todos" || o.sector === state.filtroSector || true;
+        const byLinea = state.filtroLinea === "Todas" || !state.filtroLinea || o.linea === state.filtroLinea;
+        const byTurno = state.filtroTurno === "Todos" || !state.filtroTurno || o.turno === state.filtroTurno;
+        const bySector = state.filtroSector === "Todos" || !state.filtroSector || o.sector === state.filtroSector || true;
         const bySupervisor =
           state.filtroSupervisor === "Todos" ||
+          !state.filtroSupervisor ||
           o.responsable === state.filtroSupervisor ||
           o.supervisor === state.filtroSupervisor;
         return byLinea && byTurno && bySector && bySupervisor;
@@ -181,10 +189,10 @@ function App() {
   const produccionFiltrada = useMemo(
     () =>
       produccionPeriodo.filter((r) => {
-        const byLinea = state.filtroLinea === "Todas" || r.linea === state.filtroLinea;
-        const byTurno = state.filtroTurno === "Todos" || r.turno === state.filtroTurno;
-        const bySector = state.filtroSector === "Todos" || r.sector === state.filtroSector;
-        const bySupervisor = state.filtroSupervisor === "Todos" || r.supervisor === state.filtroSupervisor;
+        const byLinea = state.filtroLinea === "Todas" || !state.filtroLinea || r.linea === state.filtroLinea;
+        const byTurno = state.filtroTurno === "Todos" || !state.filtroTurno || r.turno === state.filtroTurno;
+        const bySector = state.filtroSector === "Todos" || !state.filtroSector || r.sector === state.filtroSector;
+        const bySupervisor = state.filtroSupervisor === "Todos" || !state.filtroSupervisor || r.supervisor === state.filtroSupervisor;
         return byLinea && byTurno && bySector && bySupervisor;
       }),
     [produccionPeriodo, state.filtroLinea, state.filtroTurno, state.filtroSector, state.filtroSupervisor]
@@ -235,7 +243,7 @@ function App() {
   const pctPrev = (otsPrev / otsTot) * 100;
   const pctCorr = (otsCorr / otsTot) * 100;
 
-  // Adicional: algunos indicadores de producción (filtrados)
+  // Indicadores producción filtrados
   const totalKgProd = useMemo(
     () => produccionFiltrada.reduce((a, r) => a + (r.kgProd || 0), 0),
     [produccionFiltrada]
@@ -554,15 +562,17 @@ function App() {
           </div>
         </header>
 
-        {/* Filtros */}
+        {/* --- Top row: 3 cards (Periodo | Filtros encadenados | Capacidad & Backlog) --- */}
         <section
           style={{
             display: "grid",
             gap: "1rem",
             marginBottom: "1rem",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            alignItems: "start",
           }}
         >
+          {/* Periodo */}
           <div className="card">
             <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>Periodo</h2>
             <div
@@ -612,12 +622,13 @@ function App() {
             </div>
           </div>
 
+          {/* Filtros encadenados: Sector -> Línea -> Supervisor */}
           <div className="card">
             <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>Filtros</h2>
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 1fr 1fr 1fr",
+                gridTemplateColumns: "1fr 1fr 1fr",
                 gap: "0.5rem",
                 fontSize: "0.75rem",
               }}
@@ -627,7 +638,12 @@ function App() {
                 <select
                   value={state.filtroSector}
                   onChange={(e) =>
-                    setState((s) => ({ ...s, filtroSector: e.target.value }))
+                    setState((s) => ({
+                      ...s,
+                      filtroSector: e.target.value,
+                      // resetear línea a 'Todas' cuando sector cambia
+                      filtroLinea: "Todas",
+                    }))
                   }
                 >
                   <option value="Todos">Todos</option>
@@ -638,38 +654,21 @@ function App() {
                   ))}
                 </select>
               </div>
+
               <div>
                 <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Línea</div>
                 <select
                   value={state.filtroLinea}
-                  onChange={(e) =>
-                    setState((s) => ({ ...s, filtroLinea: e.target.value }))
-                  }
+                  onChange={(e) => setState((s) => ({ ...s, filtroLinea: e.target.value }))}
                 >
-                  <option value="Todas">Todas</option>
-                  {LINEAS.map((l) => (
+                  {opcionesLineas.map((l) => (
                     <option key={l} value={l}>
                       {l}
                     </option>
                   ))}
                 </select>
               </div>
-              <div>
-                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Turno</div>
-                <select
-                  value={state.filtroTurno}
-                  onChange={(e) =>
-                    setState((s) => ({ ...s, filtroTurno: e.target.value }))
-                  }
-                >
-                  <option value="Todos">Todos</option>
-                  {TURNOS.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </div>
+
               <div>
                 <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Supervisor</div>
                 <select
@@ -686,9 +685,25 @@ function App() {
                   ))}
                 </select>
               </div>
+
+              <div style={{ gridColumn: "1 / -1" }}>
+                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Turno</div>
+                <select
+                  value={state.filtroTurno}
+                  onChange={(e) => setState((s) => ({ ...s, filtroTurno: e.target.value }))}
+                >
+                  <option value="Todos">Todos</option>
+                  {TURNOS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
+          {/* Capacidad & Backlog */}
           <div className="card">
             <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>
               Capacidad & Backlog
@@ -720,42 +735,49 @@ function App() {
           </div>
         </section>
 
-        {/* DASHBOARD DE INDICADORES (arriba) */}
-        <section className="kpi-grid" style={{ marginBottom: "1rem" }}>
-          <KpiCard title="MTBF" value={`${formatNumber(MTBF_h)} h`} hint={`${fallas} fallas`} />
-          <KpiCard
-            title="MTTR"
-            value={`${formatNumber(MTTR_h)} h`}
-            hint={`${formatNumber(downtimeHoras)} h paro`}
-          />
-          <KpiCard
-            title="Disponibilidad"
-            value={`${formatNumber(disponibilidad * 100)} %`}
-            hint={`${formatNumber(uptimeHoras)} h uptime`}
-          />
-          <KpiCard
-            title="Cumplimiento plan prev."
-            value={`${formatNumber(cumplimientoPlan)} %`}
-            hint={`${otsCompletadas}/${otsCompletadas + otsPlanificadas || 0}`}
-          />
-          <KpiCard
-            title="% Preventivo"
-            value={`${formatNumber(pctPrev)} %`}
-            hint={`${otsPrev}/${otsFiltradas.length} OTs`}
-          />
-          <KpiCard
-            title="% Correctivo"
-            value={`${formatNumber(pctCorr)} %`}
-            hint={`${otsCorr}/${otsFiltradas.length} OTs`}
-          />
-          <KpiCard
-            title="Kg producidos (filtro)"
-            value={`${formatNumber(totalKgProd, 0)} kg`}
-            hint={`Cump. promedio: ${formatNumber(avgCumpPlan)} %`}
-          />
+        {/* --- Dashboard de indicadores (un recuadro bajo los 3 anteriores) --- */}
+        <section className="card" style={{ marginBottom: "1.5rem" }}>
+          <h2 style={{ fontSize: "0.95rem", marginBottom: "0.6rem", fontWeight: 500 }}>
+            Dashboard de indicadores
+          </h2>
+          <div className="kpi-grid" style={{ marginTop: 4 }}>
+            <KpiCard title="MTBF" value={`${formatNumber(MTBF_h)} h`} hint={`${fallas} fallas`} />
+            <KpiCard
+              title="MTTR"
+              value={`${formatNumber(MTTR_h)} h`}
+              hint={`${formatNumber(downtimeHoras)} h paro`}
+            />
+            <KpiCard
+              title="Disponibilidad"
+              value={`${formatNumber(disponibilidad * 100)} %`}
+              hint={`${formatNumber(uptimeHoras)} h uptime`}
+            />
+            <KpiCard
+              title="Cumplimiento plan prev."
+              value={`${formatNumber(cumplimientoPlan)} %`}
+              hint={`${otsCompletadas}/${otsCompletadas + otsPlanificadas || 0}`}
+            />
+            <KpiCard
+              title="% Preventivo"
+              value={`${formatNumber(pctPrev)} %`}
+              hint={`${otsPrev}/${otsFiltradas.length} OTs`}
+            />
+            <KpiCard
+              title="% Correctivo"
+              value={`${formatNumber(pctCorr)} %`}
+              hint={`${otsCorr}/${otsFiltradas.length} OTs`}
+            />
+            <KpiCard
+              title="Kg producidos (filtro)"
+              value={`${formatNumber(totalKgProd, 0)} kg`}
+              hint={`Cump. promedio: ${formatNumber(avgCumpPlan)} %`}
+            />
+          </div>
         </section>
 
-        {/* CUADRO 2: OTs Correctivas */}
+        {/* --- Secciones de entrada de datos (abajo) --- */}
+
+        {/* OTs Correctivas */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <div
             style={{
@@ -1022,7 +1044,7 @@ function App() {
           </div>
         </section>
 
-        {/* CUADRO 3: Preventivos */}
+        {/* Preventivos */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <div
             style={{
@@ -1213,7 +1235,7 @@ function App() {
           </div>
         </section>
 
-        {/* NUEVO: Producción — carga + importación CSV */}
+        {/* Producción */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <div
             style={{
@@ -1319,9 +1341,7 @@ function App() {
                                 ? {
                                     ...x,
                                     sector: nuevoSector,
-                                    linea: (LINEAS_POR_SECTOR[nuevoSector] || []).includes(
-                                      x.linea
-                                    )
+                                    linea: (LINEAS_POR_SECTOR[nuevoSector] || []).includes(x.linea)
                                       ? x.linea
                                       : "",
                                   }
@@ -1366,9 +1386,7 @@ function App() {
                           setState((s) => ({
                             ...s,
                             produccion: s.produccion.map((x) =>
-                              x.id === r.id
-                                ? { ...x, kgPlan: Number(e.target.value) }
-                                : x
+                              x.id === r.id ? { ...x, kgPlan: Number(e.target.value) } : x
                             ),
                           }))
                         }
@@ -1383,9 +1401,7 @@ function App() {
                           setState((s) => ({
                             ...s,
                             produccion: s.produccion.map((x) =>
-                              x.id === r.id
-                                ? { ...x, kgProd: Number(e.target.value) }
-                                : x
+                              x.id === r.id ? { ...x, kgProd: Number(e.target.value) } : x
                             ),
                           }))
                         }
@@ -1400,9 +1416,7 @@ function App() {
                           setState((s) => ({
                             ...s,
                             produccion: s.produccion.map((x) =>
-                              x.id === r.id
-                                ? { ...x, cumpPlan: Number(e.target.value) }
-                                : x
+                              x.id === r.id ? { ...x, cumpPlan: Number(e.target.value) } : x
                             ),
                           }))
                         }
@@ -1417,9 +1431,7 @@ function App() {
                           setState((s) => ({
                             ...s,
                             produccion: s.produccion.map((x) =>
-                              x.id === r.id
-                                ? { ...x, kgReproceso: Number(e.target.value) }
-                                : x
+                              x.id === r.id ? { ...x, kgReproceso: Number(e.target.value) } : x
                             ),
                           }))
                         }
@@ -1434,9 +1446,7 @@ function App() {
                           setState((s) => ({
                             ...s,
                             produccion: s.produccion.map((x) =>
-                              x.id === r.id
-                                ? { ...x, kgDecomiso: Number(e.target.value) }
-                                : x
+                              x.id === r.id ? { ...x, kgDecomiso: Number(e.target.value) } : x
                             ),
                           }))
                         }
@@ -1451,9 +1461,7 @@ function App() {
                           setState((s) => ({
                             ...s,
                             produccion: s.produccion.map((x) =>
-                              x.id === r.id
-                                ? { ...x, tiempoParadaMin: Number(e.target.value) }
-                                : x
+                              x.id === r.id ? { ...x, tiempoParadaMin: Number(e.target.value) } : x
                             ),
                           }))
                         }
@@ -1466,9 +1474,7 @@ function App() {
                           setState((s) => ({
                             ...s,
                             produccion: s.produccion.map((x) =>
-                              x.id === r.id
-                                ? { ...x, supervisor: e.target.value }
-                                : x
+                              x.id === r.id ? { ...x, supervisor: e.target.value } : x
                             ),
                           }))
                         }
@@ -1488,9 +1494,7 @@ function App() {
                           setState((s) => ({
                             ...s,
                             produccion: s.produccion.map((x) =>
-                              x.id === r.id
-                                ? { ...x, novedades: e.target.value }
-                                : x
+                              x.id === r.id ? { ...x, novedades: e.target.value } : x
                             ),
                           }))
                         }
@@ -1516,7 +1520,7 @@ function App() {
           </div>
         </section>
 
-        {/* NUEVO: Datos Económicos */}
+        {/* Datos Económicos */}
         <section className="card" style={{ marginBottom: "1.5rem" }}>
           <div
             style={{
