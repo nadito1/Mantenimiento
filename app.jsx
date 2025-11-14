@@ -82,6 +82,8 @@ function App() {
           capacidadHHsemana: parsed.capacidadHHsemana ?? 160,
           filtroLinea: parsed.filtroLinea ?? "Todas",
           filtroTurno: parsed.filtroTurno ?? "Todos",
+          filtroSector: parsed.filtroSector ?? "Todos",
+          filtroSupervisor: parsed.filtroSupervisor ?? "Todos",
           paradas: parsed.paradas ?? [],
           ots: parsed.ots ?? [],
           produccion: parsed.produccion ?? [],
@@ -107,6 +109,8 @@ function App() {
       capacidadHHsemana: 160,
       filtroLinea: "Todas",
       filtroTurno: "Todos",
+      filtroSector: "Todos",
+      filtroSupervisor: "Todos",
       paradas: [],
       ots: [],
       produccion: [],
@@ -142,35 +146,48 @@ function App() {
     [state.produccion, state.periodoDesde, state.periodoHasta]
   );
 
-  // Filtros por línea/turno
+  // Filtros combinados (fecha + línea/turno/sector/supervisor)
   const paradasFiltradas = useMemo(
     () =>
-      paradasPeriodo.filter(
-        (p) =>
-          (state.filtroLinea === "Todas" || p.linea === state.filtroLinea) &&
-          (state.filtroTurno === "Todos" || p.turno === state.filtroTurno)
-      ),
-    [paradasPeriodo, state.filtroLinea, state.filtroTurno]
+      paradasPeriodo.filter((p) => {
+        const byLinea = state.filtroLinea === "Todas" || p.linea === state.filtroLinea;
+        const byTurno = state.filtroTurno === "Todos" || p.turno === state.filtroTurno;
+        const bySector = state.filtroSector === "Todos" || p.sector === state.filtroSector;
+        const bySupervisor =
+          state.filtroSupervisor === "Todos" ||
+          p.supervisor === state.filtroSupervisor ||
+          p.responsable === state.filtroSupervisor;
+        return byLinea && byTurno && bySector && bySupervisor;
+      }),
+    [paradasPeriodo, state.filtroLinea, state.filtroTurno, state.filtroSector, state.filtroSupervisor]
   );
 
   const otsFiltradas = useMemo(
     () =>
-      otsPeriodo.filter(
-        (o) =>
-          (state.filtroLinea === "Todas" || o.linea === state.filtroLinea) &&
-          (state.filtroTurno === "Todos" || o.turno === state.filtroTurno)
-      ),
-    [otsPeriodo, state.filtroLinea, state.filtroTurno]
+      otsPeriodo.filter((o) => {
+        const byLinea = state.filtroLinea === "Todas" || o.linea === state.filtroLinea;
+        const byTurno = state.filtroTurno === "Todos" || o.turno === state.filtroTurno;
+        // OTs no siempre tienen sector/supervisor; aplicamos si existen o permitimos 'Todos'
+        const bySector = state.filtroSector === "Todos" || o.sector === state.filtroSector || true;
+        const bySupervisor =
+          state.filtroSupervisor === "Todos" ||
+          o.responsable === state.filtroSupervisor ||
+          o.supervisor === state.filtroSupervisor;
+        return byLinea && byTurno && bySector && bySupervisor;
+      }),
+    [otsPeriodo, state.filtroLinea, state.filtroTurno, state.filtroSector, state.filtroSupervisor]
   );
 
   const produccionFiltrada = useMemo(
     () =>
-      produccionPeriodo.filter(
-        (r) =>
-          (state.filtroLinea === "Todas" || r.linea === state.filtroLinea) &&
-          (state.filtroTurno === "Todos" || r.turno === state.filtroTurno)
-      ),
-    [produccionPeriodo, state.filtroLinea, state.filtroTurno]
+      produccionPeriodo.filter((r) => {
+        const byLinea = state.filtroLinea === "Todas" || r.linea === state.filtroLinea;
+        const byTurno = state.filtroTurno === "Todos" || r.turno === state.filtroTurno;
+        const bySector = state.filtroSector === "Todos" || r.sector === state.filtroSector;
+        const bySupervisor = state.filtroSupervisor === "Todos" || r.supervisor === state.filtroSupervisor;
+        return byLinea && byTurno && bySector && bySupervisor;
+      }),
+    [produccionPeriodo, state.filtroLinea, state.filtroTurno, state.filtroSector, state.filtroSupervisor]
   );
 
   // Subconjuntos por tipo
@@ -183,7 +200,7 @@ function App() {
     [otsFiltradas]
   );
 
-  // KPIs mantenimiento
+  // KPIs mantenimiento (usar datos filtrados)
   const downtimeTotalMin = useMemo(
     () => paradasFiltradas.reduce((acc, p) => acc + (Number(p.downtimeMin) || 0), 0),
     [paradasFiltradas]
@@ -217,6 +234,19 @@ function App() {
   const otsTot = Math.max(1, otsFiltradas.length);
   const pctPrev = (otsPrev / otsTot) * 100;
   const pctCorr = (otsCorr / otsTot) * 100;
+
+  // Adicional: algunos indicadores de producción (filtrados)
+  const totalKgProd = useMemo(
+    () => produccionFiltrada.reduce((a, r) => a + (r.kgProd || 0), 0),
+    [produccionFiltrada]
+  );
+  const avgCumpPlan = useMemo(
+    () =>
+      produccionFiltrada.length > 0
+        ? produccionFiltrada.reduce((a, r) => a + (r.cumpPlan || 0), 0) / produccionFiltrada.length
+        : 0,
+    [produccionFiltrada]
+  );
 
   // Manejo formularios OTs / producción / economía
   const addOTCorrectiva = () => {
@@ -587,11 +617,27 @@ function App() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 1fr",
+                gridTemplateColumns: "1fr 1fr 1fr 1fr",
                 gap: "0.5rem",
                 fontSize: "0.75rem",
               }}
             >
+              <div>
+                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Sector</div>
+                <select
+                  value={state.filtroSector}
+                  onChange={(e) =>
+                    setState((s) => ({ ...s, filtroSector: e.target.value }))
+                  }
+                >
+                  <option value="Todos">Todos</option>
+                  {SECTORES.map((sec) => (
+                    <option key={sec} value={sec}>
+                      {sec}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Línea</div>
                 <select
@@ -620,6 +666,22 @@ function App() {
                   {TURNOS.map((t) => (
                     <option key={t} value={t}>
                       {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div style={{ color: "#6b7280", marginBottom: "0.1rem" }}>Supervisor</div>
+                <select
+                  value={state.filtroSupervisor}
+                  onChange={(e) =>
+                    setState((s) => ({ ...s, filtroSupervisor: e.target.value }))
+                  }
+                >
+                  <option value="Todos">Todos</option>
+                  {SUPERVISORES.map((sup) => (
+                    <option key={sup} value={sup}>
+                      {sup}
                     </option>
                   ))}
                 </select>
@@ -658,7 +720,7 @@ function App() {
           </div>
         </section>
 
-        {/* KPIs */}
+        {/* DASHBOARD DE INDICADORES (arriba) */}
         <section className="kpi-grid" style={{ marginBottom: "1rem" }}>
           <KpiCard title="MTBF" value={`${formatNumber(MTBF_h)} h`} hint={`${fallas} fallas`} />
           <KpiCard
@@ -685,6 +747,11 @@ function App() {
             title="% Correctivo"
             value={`${formatNumber(pctCorr)} %`}
             hint={`${otsCorr}/${otsFiltradas.length} OTs`}
+          />
+          <KpiCard
+            title="Kg producidos (filtro)"
+            value={`${formatNumber(totalKgProd, 0)} kg`}
+            hint={`Cump. promedio: ${formatNumber(avgCumpPlan)} %`}
           />
         </section>
 
