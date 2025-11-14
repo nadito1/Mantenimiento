@@ -2,25 +2,21 @@
 <html lang="es">
   <head>
     <meta charset="utf-8" />
-    <title>KPIs Mantenimiento Georgalos</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mantenimiento — Panel</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div id="root"></div>
 
-    <!-- React + ReactDOM -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- React + ReactDOM (CDN) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
 
-    <!-- Babel para compilar JSX en el navegador -->
+    <!-- Babel para poder usar JSX sin build (solo en desarrollo) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- App: indicamos a Babel qué presets usar -->
-    <script
-      type="text/babel"
-      data-presets="env,react"
-      src="app.jsx">
-    </script>
+    <!-- Cargar app.jsx con type babel -->
+    <script type="text/babel" src="app.jsx"></script>
   </body>
 </html>
