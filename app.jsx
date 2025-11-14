@@ -218,43 +218,6 @@ function App() {
   const pctPrev = (otsPrev / otsTot) * 100;
   const pctCorr = (otsCorr / otsTot) * 100;
 
-  // Patrones Flynn (siguen usando paradas si las importás)
-  const patrones = [
-    {
-      id: "falta_insumos",
-      label: "Falta de insumos",
-      test: (p) => p.tipoParada === "Falta de insumos" || /insumo/i.test(p.motivo || ""),
-    },
-    {
-      id: "estuchadora",
-      label: "Estuchadora",
-      test: (p) =>
-        /estuchador|estuchadora/i.test((p.equipo || "") + " " + (p.motivo || "")) ||
-        p.area === "Estuchadora",
-    },
-    {
-      id: "balanza",
-      label: "Balanza",
-      test: (p) =>
-        /balanza/i.test((p.equipo || "") + " " + (p.motivo || "")) || p.area === "Balanza",
-    },
-    {
-      id: "refrigeracion",
-      label: "Mesas de refrigeración",
-      test: (p) =>
-        /refrig|fr[ií]o|mesa/i.test(p.motivo || "") || p.area === "Mesas de refrigeración",
-    },
-  ];
-
-  const resumenPatrones = patrones.map((pat) => ({
-    id: pat.id,
-    label: pat.label,
-    conteo: paradasFiltradas.filter(pat.test).length,
-    minutos: paradasFiltradas
-      .filter(pat.test)
-      .reduce((a, p) => a + (p.downtimeMin || 0), 0),
-  }));
-
   // Manejo formularios OTs / producción / economía
   const addOTCorrectiva = () => {
     setState((s) => ({
@@ -723,42 +686,6 @@ function App() {
             value={`${formatNumber(pctCorr)} %`}
             hint={`${otsCorr}/${otsFiltradas.length} OTs`}
           />
-        </section>
-
-        {/* Patrones */}
-        <section className="card" style={{ marginBottom: "1.5rem" }}>
-          <h2 style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>
-            Patrones frecuentes (Flynn)
-          </h2>
-          <div
-            style={{
-              display: "grid",
-              gap: "0.75rem",
-              gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-            }}
-          >
-            {resumenPatrones.map((r) => (
-              <div
-                key={r.id}
-                style={{
-                  borderRadius: "0.9rem",
-                  border: "1px solid #e5e7eb",
-                  padding: "0.5rem 0.6rem",
-                  fontSize: "0.8rem",
-                }}
-              >
-                <div style={{ color: "#6b7280" }}>{r.label}</div>
-                <div
-                  style={{ fontSize: "1.1rem", fontWeight: 600, lineHeight: 1, marginTop: 4 }}
-                >
-                  {r.conteo} eventos
-                </div>
-                <div style={{ fontSize: "0.75rem", color: "#6b7280" }}>
-                  {formatNumber(r.minutos)} min
-                </div>
-              </div>
-            ))}
-          </div>
         </section>
 
         {/* CUADRO 2: OTs Correctivas */}
@@ -1676,7 +1603,7 @@ function App() {
       </div>
     </div>
   );
-} 
+}
 function KpiCard({ title, value, hint }) {
   return (
     <div className="card">
